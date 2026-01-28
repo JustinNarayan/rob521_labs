@@ -7,6 +7,7 @@ from scipy.linalg import block_diag
 from scipy.spatial.distance import cityblock
 import rospy
 import tf2_ros
+from utils import Point, Pose
 
 # msgs
 from geometry_msgs.msg import TransformStamped, Twist, PoseStamped
@@ -32,7 +33,12 @@ PATH_NAME = 'path.npy'  # saved path from l2_planning.py, should be in the same 
 
 # here are some hardcoded paths to use if you want to develop l2_planning and this file in parallel
 # TEMP_HARDCODE_PATH = [[2, 0, 0], [2.75, -1, -np.pi/2], [2.75, -4, -np.pi/2], [2, -4.4, np.pi]]  # almost collision-free
-TEMP_HARDCODE_PATH = [[2, -.5, 0], [2.4, -1, -np.pi/2], [2.45, -3.5, -np.pi/2], [1.5, -4.4, np.pi]]  # some possible collisions
+TEMP_HARDCODE_PATH = [
+    Pose(2, -.5, 0),
+    Pose(2.4, -1, -np.pi/2),
+    Pose(2.45, -3.5, -np.pi/2),
+    Pose(1.5, -4.4, np.pi)
+]  # some possible collisions
 
 
 #Map Handling Functions
@@ -78,7 +84,7 @@ class PathFollower():
         occupancy_map = load_map(map_filename)
         self.map_np = occupancy_map
         self.map_resolution = 0.05
-        self.map_origin = np.array([ 0.2 , 0.2 ,-0. ])
+        self.map_origin = Pose(0.2, 0.2, -0)
         self.map_nonzero_idxes = np.argwhere(self.map_np)
 
 
@@ -98,8 +104,8 @@ class PathFollower():
 
         # transforms
         self.map_baselink_tf = self.tf_buffer.lookup_transform('map', 'base_footprint', rospy.Time(0), rospy.Duration(2.0))
-        self.pose_in_map_np = np.zeros(3)
-        self.pos_in_map_pix = np.zeros(2)
+        self.pose_in_map_np = Pose(0, 0, 0)
+        self.pos_in_map_pix = Point(0, 0)
         self.update_pose()
 
         # path variables
@@ -153,7 +159,12 @@ class PathFollower():
 
             # check all trajectory points for collisions
             # first find the closest collision point in the map to each local path point
-            local_paths_pixels = (self.map_origin[:2] + local_paths[:, :, :2]) / self.map_resolution
+            local_paths_pixels = [
+                Point(
+                    (self.map_origin.get_x() + path.get_x()) / self.map_resolution,
+                    (self.map_origin.get_y() + path.get_y()) / self.map_resolution,
+                ) for path in local_paths[:, :]
+            ]
             valid_opts = range(self.num_opts)
             local_paths_lowest_collision_dist = np.ones(self.num_opts) * 50
 

@@ -5,6 +5,85 @@ import tf_conversions
 from geometry_msgs.msg import Transform, Pose, Quaternion, PoseStamped, Twist
 from nav_msgs.msg import Path
 
+
+###############################################
+#                   CLASSES                   #
+###############################################
+
+# Point representing (x,y)
+class Point:
+    # Create a point
+    def __init__(self, x: float, y: float):
+        self.point = np.array([ [x], [y] ], dtype=float)
+        
+    # Update values
+    @property
+    def set(self, x: float = None, y: float = None):
+        if x is not None:
+            self.point[1, 0] = x
+        if y is not None:
+            self.point[1, 1] = y
+            
+    # Get values
+    @property
+    def get_x(self):
+        return self.x
+    
+    @property
+    def get_y(self):
+        return self.y
+    
+    # Get NumPy representation  
+    @property
+    def as_vector(self):
+        return self.point
+    
+    # Print
+    def __repr__(self):
+        return f"Point(x={self.x}, y={self.y}, theta={self.theta})"
+
+# Pose representing robot's (x,y,theta) orientation
+class Pose:
+    # Create a pose
+    def __init__(self, x: float, y: float, theta: float):
+        self.pose = np.array([ [x], [y], [theta] ], dtype=float)
+        
+    # Update values
+    @property
+    def set(self, x: float = None, y: float = None, theta: float = None):
+        if x is not None:
+            self.point[1, 0] = x
+        if y is not None:
+            self.point[1, 1] = y
+        if theta is not None:
+            self.point[1, 2] = theta
+            
+    # Get values
+    @property
+    def get_x(self):
+        return self.x
+    
+    @property
+    def get_y(self):
+        return self.y
+    
+    @property
+    def get_theta(self):
+        return self.theta
+    
+    # Get NumPy representation  
+    @property
+    def as_vector(self):
+        return self.pose
+    
+    # Print
+    def __repr__(self):
+        return f"Pose(x={self.x}, y={self.y})"
+
+###############################################
+#                  UTILITIES                  #
+###############################################
+
 def se2_pose_list_to_path(pose_list, ref_frame):
     # convert a list of poses to a path
     path = Path()
@@ -58,7 +137,10 @@ def np_q_from_ros_q(q):
 
 def ros_q_from_np_q(np_q):
     q = Quaternion()
-    q.x = np_q[0]; q.y = np_q[1]; q.z = np_q[2]; q.w = np_q[3]
+    q.x = np_q[0]
+    q.y = np_q[1]
+    q.z = np_q[2]
+    q.w = np_q[3]
     return q
 
 
@@ -73,22 +155,30 @@ def tf_mat_to_tf(tf_mat):
     # convert 4x4 np se3 matrix to ros transform
     tf = Transform()
     [tf.translation.x, tf.translation.y, tf.translation.z] = tf_mat[:3, 3]
-    tf.rotation = ros_q_from_np_q(tf_conversions.transformations.quaternion_from_matrix(tf_mat))
+    tf.rotation = ros_q_from_np_q(
+        tf_conversions.transformations.quaternion_from_matrix(tf_mat)
+    )
     return tf
 
 
 def tf_to_se2_tf_mat(tf):
     # convert ros transform to 3x3 np se2 matrix
     theta = euler_from_ros_quat(tf.rotation)[2]
-    mat = np.array([[np.cos(theta), -np.sin(theta), tf.translation.x],
-                    [np.sin(theta), np.cos(theta), tf.translation.y],
-                    [0, 0, 1]])
+    mat = np.array(
+        [
+            [np.cos(theta), -np.sin(theta), tf.translation.x],
+            [np.sin(theta), np.cos(theta), tf.translation.y],
+            [0, 0, 1],
+        ]
+    )
     return mat
 
 
 def se2_pose_from_pose(pose):
     # convert a ros pose to a (3,) np array in SE2
-    return np.array([pose.position.x, pose.position.y, euler_from_ros_quat(pose.orientation)[2]])
+    return np.array(
+        [pose.position.x, pose.position.y, euler_from_ros_quat(pose.orientation)[2]]
+    )
 
 
 def pose_from_se2_pose(np_pose):

@@ -1,5 +1,6 @@
+# Imports
 import numpy as np
-from ..nodes.l2_planning import PathPlanner
+from lab2.nodes.l2_planning import PathPlanner
 
 ### Set up Path Planner
 # map info

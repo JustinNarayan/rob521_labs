@@ -1,17 +1,27 @@
 #!/usr/bin/env python3
 # Standard Libraries
+import os
 import numpy as np
 import yaml
 import pygame
 import time
-import pygame_utils
 import matplotlib.image as mpimg
 from skimage.draw import disk
 from scipy.linalg import block_diag
 
+# needed to make this work on Windows
+# import pygame_utils
+import lab2.nodes.pygame_utils as pygame_utils
+
 
 def load_map(filename):
-    im = mpimg.imread("../maps/" + filename)
+    # Get the filepath
+    full_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "lab2", "maps", filename)
+    )
+    
+    # Load
+    im = mpimg.imread(full_path)
     if len(im.shape) > 2:
         im = im[:, :, 0]
     im_np = np.array(im)  # Whitespace is true, black is false
@@ -20,7 +30,13 @@ def load_map(filename):
 
 
 def load_map_yaml(filename):
-    with open("../maps/" + filename, "r") as stream:
+    # Get the filepath
+    full_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "lab2", "maps", filename)
+    )
+    
+    # Load
+    with open(full_path, "r") as stream:
         map_settings_dict = yaml.safe_load(stream)
     return map_settings_dict
 

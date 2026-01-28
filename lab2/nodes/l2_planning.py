@@ -152,19 +152,98 @@ class PathPlanner:
         print("TO DO: Implement a way to rollout the controls chosen")
         return np.zeros((3, self.num_substeps))
 
-    def point_to_cell(self, point):
-        # Convert a series of [x,y] points in the map to the indices for the corresponding cell in the occupancy map
-        # point is a 2 by N matrix of points of interest
-        print(
-            "TO DO: Implement a method to get the map cell the robot is currently occupying"
-        )
-        return 0
+    def point_to_cell(self, points):
+        # points: a series of (2xN) points of interest from the map reference
+        #       | [x1, x2, ..., xN]
+        # i.e.  | [y1, y2, ..., yN]
+        #
+        # Convert each (x,y) pair to the indices in occupancy map
+        # The map's "reference" frame is the bottom left-hand corner of the map
+        # The occupancy map's reference frame is the true origin
+        #
+        # Output: cells
+        #      | [xmap1, xmap2, ..., xmapN]
+        # i.e. | [ymap1, ymap2, ..., ymapN]
+        
+        # Output
+        cells = np.zeros_like(points)
+        
+        # Extract map properties
+        res_m_per_px = self.map_settings_dict['resolution']
+        w_px, h_px = self.map_shape
+        w_m, h_m = w_px * res_m_per_px, h_px * res_m_per_px
+        
+        # "Origin" property is offset of map reference frame from the true origin
+        # Provided r_PF (point from frame), get r_PO (point from origin)
+        # r_PO = r_PF - r_FO (frame from origin)
+        frame_from_origin = np.array(self.map_settings_dict['origin'][:2]).reshape(2,1)
+        
+        # Points are given in meters
+        num_points = points.shape[1]
+        for i in range(num_points):
+            # Extract r_PF
+            pt_from_frame = points[:, i].reshape(2,1)
+            
+            # Get r_PO
+            pt = pt_from_frame - frame_from_origin
+            
+            # Flip y-axis w.r.t. map height to match occupancy map
+            # Occupancy map counts left and down
+            # Robot coordinates count left and up
+            pt[1] = h_m - pt[1]
+            
+            # Convert meters to pixels
+            pt_occ_map = (pt / res_m_per_px).astype(int) # pixels must be in an integer grid
+            
+            # Input into grid
+            cells[:, i] = pt_occ_map.squeeze()
+        
+        # Output cells (pixels) from meters
+        return cells
 
     def points_to_robot_circle(self, points):
-        # Convert a series of [x,y] points to robot map footprints for collision detection
-        # Hint: The disk function is included to help you with this function
-        print("TO DO: Implement a method to get the pixel locations of the robot path")
-        return [], []
+        # points: a series of (2xN) points of interest from the map reference to calculate disks for
+        #       | [x1, x2, ..., xN] |
+        # i.e.  | [y1, y2, ..., yN] |
+        #
+        # Get the cells corresponding to each (x,y) pair.
+        # For each cell, construct a set of cells corresponding to the robot's area.
+        # Each (x,y) pair generates an array listing each cell the robot enchroaches on.
+        #
+        # Output: list with a set of occupied cells for each (x,y) pair
+        # | --------------------- |
+        # | | [x1_1, x1_2, ...] | |
+        # | | [y1_1, y1_2, ...] | |
+        # | --------------------- |
+        # | | [x2_1, x2_2, ...] | |
+        # | | [y2_1, y2_2, ...] | |
+        # | --------------------- |
+        # |          ...          |
+        
+        # Output
+        occ_cells = []
+        
+        # Extract map and robot properties
+        res_m_per_px = self.map_settings_dict['resolution']
+        radius_px = self.robot_radius / res_m_per_px
+        
+        # Get cells from points
+        cells = self.point_to_cell(points)
+        
+        # Get occupied cells from each center cell
+        num_cells = cells.shape[1]
+        for i in range(num_cells):
+            # Get robot center
+            [x], [y] = cells[:, i].reshape(2, 1)
+            
+            # Get all occupied cells
+            xs, ys = disk( (x, y), radius_px, shape=self.map_shape)
+            
+            # Add to output
+            occ_cells.append(np.vstack([ xs, ys ]))
+        
+        # Return occupied cells
+        return np.array(occ_cells)
 
     # Note: If you have correctly completed all previous functions, then you should be able to create a working RRT function
 

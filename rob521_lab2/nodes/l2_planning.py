@@ -2,6 +2,7 @@
 # Standard Libraries
 import os
 import numpy as np
+from math import sqrt
 import yaml
 import pygame
 import time
@@ -43,13 +44,15 @@ def load_map_yaml(filename):
 
 # Node for building a graph
 class Node:
-    def __init__(self, point, parent_id, cost):
-        self.point = point  # A 3 by 1 vector [x, y, theta]
+    def __init__(self, pose, parent_id, cost):
+        self.pose = pose  # A 3 by 1 vector [x, y, theta]
         self.parent_id = parent_id  # The parent node id that leads to this node (There should only every be one parent in RRT)
         self.cost = cost  # The cost to come to this node
         self.children_ids = []  # The children node ids of this node
         return
 
+    def get_pose(self):
+        return self.pose
 
 # Path Planner
 class PathPlanner:
@@ -127,30 +130,147 @@ class PathPlanner:
         print("TO DO: Implement a method to get the closest node to a sapled point")
         return 0
 
-    def simulate_trajectory(self, node_i, point_s):
-        # Simulates the non-holonomic motion of the robot.
-        # This function drives the robot from node_i towards point_s. This function does has many solutions!
-        # node_i is a 3 by 1 vector [x;y;theta] this can be used to construct the SE(2) matrix T_{OI} in course notation
-        # point_s is the sampled point vector [x; y]
-        print("TO DO: Implment a method to simulate a trajectory given a sampled point")
-        vel, rot_vel = self.robot_controller(node_i, point_s)
+    def simulate_trajectory(self, node_i: Node, point_s):
+        # A starting node and goal point is selected.
+        # Both are given in the inertial frame.
+        # 
+        # The robot will then execute maneuvers to bring the robot close to the goal point.
+        # The loop repeats until the goal point is reached or a max iteration count is reached.
+        #
+        # The loop is:
+        # (0) start from node_i (global frame)
+        # (1) convert current node (robot frame)
+        # (2) choose v, w for robot
+        # (3) calculate 3xN poses (robot frame)
+        # (4) shift all 3xN poses by current node in robot frame
+        # (5) determine where the robot ended up (global frame)
+        # (6) set the end of trajectory as the current node
+        # (7) Repeat from (1) until end state reached
+        
+        # Init
+        iters, max_iters = 0, 10
+        curr_dist, stopping_dist = None, 0.25 # after first iter
+        cur_node = node_i
+        traj = np.array((3,0))
+        
+        # Loop
+        while (iters < max_iters) and ((curr_dist == None) or curr_dist > stopping_dist):
+            # Select velocities
+            v, w = self.robot_controller(node_i, point_s)
+            
+            # Step forward in robot frame
+            theta_0 = node_i.get_pose()[2]
+            traj_robot = self.trajectory_rollout(v, w, theta_0)
+            
+            # Convert all poses to global frame and shift by current node
+            traj_global = np.zeros_like(traj) # TODO
+            
+            # Update trajectory and current node
+            cur_node = Node(traj_global[:, -1], None, None)
+            traj = np.hstack( (traj, traj_global) )
+            
+            # Update stopping criteria
+            iters += 1
+            dX, dY = cur_node.get_pose()[0] - point_s[0], cur_node.get_pose()[1] - point_s[1]
+            curr_dist = sqrt(dX**2 + dY**2)
+            
+        return traj
 
-        robot_traj = self.trajectory_rollout(vel, rot_vel)
-        return robot_traj
+    def robot_controller(self, node_i: Node, point_s):
+        # Node starts from (x_0, y_0, theta_0)
+        # Point contains (x,y)
+        # Generate a (v, w) pair to push the robot to (x, y, ?) from (x_0, y_0, theta_0)
+        
+        # Extract points
+        x_0, y_0, theta_0 = node_i.get_pose()
+        x, y = point_s
+        
+        # Compute errors
+        dX, dY = x - x_0, y - y_0
+        dist = sqrt(dX**2 + dY**2)
+        theta = np.atan2(dY, dX)
+        dTheta = theta - theta_0
+        dTheta = np.atan2( np.sin(dTheta), np.cos(dTheta) ) # now in [-np.pi, np.pi]
+        
+        # If large dTheta, just rotate
+        min_dTheta_for_just_rotation = (1/3)*np.pi
+        v,w = 0,0
+        if abs(dTheta) > min_dTheta_for_just_rotation:
+            v = 0
+            w = self.rot_vel_max * np.sign(dTheta)
+        
+        # Simple proportional controller
+        else:
+            K_v, K_w = 0.5, 1.0 # prioritize rotation
+            v = np.clip(
+                K_v * dist, 0, self.vel_max
+            )
+            w = np.clip(
+                K_w * dTheta, -self.rot_vel_max, self.rot_vel_max
+            )
+        
+        # Return
+        return v, w
 
-    def robot_controller(self, node_i, point_s):
-        # This controller determines the velocities that will nominally move the robot from node i to node s
-        # Max velocities should be enforced
-        print(
-            "TO DO: Implement a control scheme to drive you towards the sampled point"
-        )
-        return 0, 0
-
-    def trajectory_rollout(self, vel, rot_vel):
-        # Given your chosen velocities determine the trajectory of the robot for your given timestep
-        # The returned trajectory should be a series of points to check for collisions
-        print("TO DO: Implement a way to rollout the controls chosen")
-        return np.zeros((3, self.num_substeps))
+    def trajectory_rollout(
+        self, 
+        v, # velocity 
+        w, # rotational velocity
+        theta_0, 
+        num_timesteps = 10, # self.num_substeps 
+        t_horizon = 1 # self.timestep
+    ):
+        # Compute a set of waypoints provided a velocity (m/s) and rotational velocity (rad/s)
+        # A starting theta is required to compute dX and dY in the global frame.
+        # +w is rotation CCW
+        #
+        # Output dX, dY, dTheta is in the global, inertial frame. 
+        #
+        # Compute <num_timesteps> timesteps evenly spaced @ <dt> second increments
+        #
+        # Unicycle model:
+        # |   x_dot   |   | cos(theta) 0 | | v |
+        # |   y_dot   | = | sin(theta) 0 | | w |
+        # | theta_dot |   |     0      1 |
+        #
+        # -> x_dot = cos(theta) * v
+        # -> y_dot = sin(theta) * v
+        # -> theta_dot = w
+        #
+        # To get timesteps, we need to integrate:
+        # 
+        # -> dX     = (v/w) ( sin(theta_0 + w*t) - sin(theta_0))
+        # -> dY     = (v/w) (-cos(theta_0 + w*t) + cos(theta_0))
+        # -> dTheta = w*t
+        #
+        # If w=0 and it's a straight line:
+        #
+        # -> dX     = v*t*cos(theta_0)
+        # -> dY     = v*t*sin(theta_0)
+        # -> dTheta = 0
+        #
+        # Output trajectory: 3x<num_timesteps>:
+        # | [dX1,     dX2,     ...]
+        # | [dY1,     dY2,     ...]
+        # | [dTheta1, dTheta2, ...]
+        
+        # Time
+        t = np.linspace(0, t_horizon, num_timesteps)
+        
+        # Compute trajectory
+        xs, ys = [], []
+        thetas = w * t # same regardless of w
+        # w = 0
+        if w == 0:
+            xs = [ v * t * np.cos(theta_0) ]
+            ys = [ v * t * np.sin(theta_0) ]
+        # w != 0
+        else:
+            xs = [(v/w) * ( np.sin(theta_0 + w*t) - np.sin(theta_0) )]
+            ys = [(v/w) * (-np.cos(theta_0 + w*t) + np.cos(theta_0) )]
+        
+        # Return trajectory
+        return np.vstack( (xs, ys, thetas) )
 
     def point_to_cell(self, points):
         # points: a series of (2xN) points of interest from the map reference

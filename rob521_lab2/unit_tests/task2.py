@@ -1,6 +1,6 @@
 # Imports
 import numpy as np
-from lab2.nodes.l2_planning import PathPlanner
+from lab2.nodes.l2_planning import PathPlanner, Node
 
 ### Set up Path Planner
 # map info
@@ -17,22 +17,79 @@ path_planner = PathPlanner(
 
 ### Trajectory Rollout
 
-# ...
-path_planner.trajectory_rollout( 0.5, 0.1 )
+# No velocity
+trajectory = path_planner.trajectory_rollout(v=0, w=0, theta_0=0.25*np.pi)
+'''
+Robot is stationary
+'''
+print(trajectory)
 
-# ...
-path_planner.trajectory_rollout( 0.1, 0.2 )
+# Linear velocity
+trajectory = path_planner.trajectory_rollout(v=0.5, w=0, theta_0=0.75*np.pi, num_timesteps=4, t_horizon=1)
+'''
+Robot moves in the -X and +Y direction (left, up in the robot frame)
+'''
+print(trajectory)
 
+# Rotational velocity
+trajectory = path_planner.trajectory_rollout(v=0, w=-0.25, theta_0=0, num_timesteps=4, t_horizon=1)
+'''
+Robot rotates in CW direction (rotation from left to down)
+'''
+print(trajectory)
 
+# Combined velocity
+trajectory = path_planner.trajectory_rollout(v=0.05, w=0.25, theta_0=0.5*np.pi, num_timesteps=4, t_horizon=2)
+'''
+Robot start moving straight up and slightly rotates to the left
+'''
+print(trajectory)
 
 ### Robot Controller
 
-# ...
-path_planner.robot_controller( 0, np.array([0,0]) )
+# Straight ahead
+node_i = Node( (0,0,np.pi), 0, 0 )
+v,w = path_planner.robot_controller(
+    node_i, (-5, 0)
+)
+'''
+New point to the left and robot already facing direction.
+Expect only linear velocity.
+'''
+print(v, w)
 
+# Rotation -ve
+v,w = path_planner.robot_controller(
+    node_i, (5, 0.5)
+)
+'''
+Robot facing left. Point is to the right and slightly up.
+Expect full rotation CW.
+'''
+print(v, w)
+
+# Rotation +ve
+v,w = path_planner.robot_controller(
+    node_i, (5, -0.5)
+)
+'''
+Robot facing left. Point is to the right and slightly down.
+Expect full rotation CCW.
+'''
+print(v, w)
+
+# Mix rotation and velocity
+v,w = path_planner.robot_controller(
+    node_i, (-10, 1)
+)
+'''
+Robot facing left. Point is further right and slightly up.
+Expect some forward and CCW movement.
+'''
+print(v,w)
 
 
 ### Simulate Trajectory
 
 # ...
-path_planner.simulate_trajectory( 0, np.array([0,0]) )
+# path_planner.simulate_trajectory( 0, np.array([0,0]) )

@@ -18,6 +18,7 @@ path_planner = PathPlanner(
 ### Trajectory Rollout
 
 # No velocity
+print('no velocity')
 trajectory = path_planner.trajectory_rollout(v=0, w=0, theta_0=0.25*np.pi)
 '''
 Robot is stationary
@@ -25,6 +26,7 @@ Robot is stationary
 print(trajectory)
 
 # Linear velocity
+print('linear velocity')
 trajectory = path_planner.trajectory_rollout(v=0.5, w=0, theta_0=0.75*np.pi, num_timesteps=4, t_horizon=1)
 '''
 Robot moves in the -X and +Y direction (left, up in the robot frame)
@@ -32,6 +34,7 @@ Robot moves in the -X and +Y direction (left, up in the robot frame)
 print(trajectory)
 
 # Rotational velocity
+print('rotational velocity')
 trajectory = path_planner.trajectory_rollout(v=0, w=-0.25, theta_0=0, num_timesteps=4, t_horizon=1)
 '''
 Robot rotates in CW direction (rotation from left to down)
@@ -39,11 +42,22 @@ Robot rotates in CW direction (rotation from left to down)
 print(trajectory)
 
 # Combined velocity
+print('combined velocity')
 trajectory = path_planner.trajectory_rollout(v=0.05, w=0.25, theta_0=0.5*np.pi, num_timesteps=4, t_horizon=2)
 '''
 Robot start moving straight up and slightly rotates to the left
 '''
 print(trajectory)
+
+# Starting node
+print('starting node')
+node_init = Node([5, 5, np.pi/4], 0, 0)
+trajectory = path_planner.trajectory_rollout(v=0.05, w=0.25, theta_0=0.5*np.pi, num_timesteps=4, t_horizon=2, starting_node=node_init)
+'''
+Robot start moving straight up and slightly rotates to the left, but from (5, 5, 45 degrees)
+'''
+print(trajectory)
+
 
 ### Robot Controller
 
@@ -89,7 +103,36 @@ Expect some forward and CCW movement.
 print(v,w)
 
 
-### Simulate Trajectory
+### Simulate Trajectory # IN PROGRESS
 
-# ...
-# path_planner.simulate_trajectory( 0, np.array([0,0]) )
+# Free path 1
+node_i = Node( (0,0,0), 0, 0 )
+trajectory = path_planner.simulate_trajectory(node_i, (10,0))
+'''
+For this map, this is a free path. Should be valid increasing in X.
+'''
+print(trajectory)
+
+# Free path 2
+node_i = Node( (10,78.8,np.pi/2), 0, 0 )
+trajectory = path_planner.simulate_trajectory(node_i, (10,100))
+'''
+For this map, this is a free path. Should be valid decreasing in Y.
+'''
+print(trajectory)
+
+# Free path 3
+node_i = Node( (10,78.8,np.pi/2), 0, 0 )
+trajectory = path_planner.simulate_trajectory(node_i, (9,0))
+'''
+For this map, this is a free path. Should be rotating from pi (up) CCW to down-left (increasing theta).
+'''
+print(trajectory)
+
+# Collision path
+node_i = Node( (61,78.6,np.pi/2), 0, 0 )
+trajectory = path_planner.simulate_trajectory(node_i, (61,100))
+'''
+For this map, this is a free path. Should be rotating from pi (up) CCW to down-left (increasing theta).
+'''
+print(trajectory)

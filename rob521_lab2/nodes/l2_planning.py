@@ -14,6 +14,8 @@ from scipy.linalg import block_diag
 # import pygame_utils
 import rob521_labs.lab2.nodes.pygame_utils as pygame_utils
 
+def normalize_angle(angle):
+    return np.atan2( np.sin(angle), np.cos(angle) ) # now in [-np.pi, np.pi]
 
 def load_map(filename):
     # Get the filepath
@@ -134,47 +136,19 @@ class PathPlanner:
         # A starting node and goal point is selected.
         # Both are given in the inertial frame.
         # 
-        # The robot will then execute maneuvers to bring the robot close to the goal point.
-        # The loop repeats until the goal point is reached or a max iteration count is reached.
+        # Linear and rotation velocity commands are chosen for the robot in the global frame.
+        # These commands, plus the starting node are passed to the robot.
+        # A global output trajectory is produced:
+        #   - x,y coordinates in the global frame
+        #   - theta heading in the global frame
         #
-        # The loop is:
-        # (0) start from node_i (global frame)
-        # (1) convert current node (robot frame)
-        # (2) choose v, w for robot
-        # (3) calculate 3xN poses (robot frame)
-        # (4) shift all 3xN poses by current node in robot frame
-        # (5) determine where the robot ended up (global frame)
-        # (6) set the end of trajectory as the current node
-        # (7) Repeat from (1) until end state reached
+        # The output trajectory is returned if there are no collisons; otherwise None
+        v, w = self.robot_controller(node_i, point_s)
+        trajectory = self.trajectory_rollout(v, w, node_i.get_pose()[2], starting_node=node_i)
         
-        # Init
-        iters, max_iters = 0, 10
-        curr_dist, stopping_dist = None, 0.25 # after first iter
-        cur_node = node_i
-        traj = np.array((3,0))
-        
-        # Loop
-        while (iters < max_iters) and ((curr_dist == None) or curr_dist > stopping_dist):
-            # Select velocities
-            v, w = self.robot_controller(node_i, point_s)
-            
-            # Step forward in robot frame
-            theta_0 = node_i.get_pose()[2]
-            traj_robot = self.trajectory_rollout(v, w, theta_0)
-            
-            # Convert all poses to global frame and shift by current node
-            traj_global = np.zeros_like(traj) # TODO
-            
-            # Update trajectory and current node
-            cur_node = Node(traj_global[:, -1], None, None)
-            traj = np.hstack( (traj, traj_global) )
-            
-            # Update stopping criteria
-            iters += 1
-            dX, dY = cur_node.get_pose()[0] - point_s[0], cur_node.get_pose()[1] - point_s[1]
-            curr_dist = sqrt(dX**2 + dY**2)
-            
-        return traj
+        if self.trajectory_collision_free(trajectory):
+            return trajectory
+        return None
 
     def robot_controller(self, node_i: Node, point_s):
         # Node starts from (x_0, y_0, theta_0)
@@ -190,7 +164,7 @@ class PathPlanner:
         dist = sqrt(dX**2 + dY**2)
         theta = np.atan2(dY, dX)
         dTheta = theta - theta_0
-        dTheta = np.atan2( np.sin(dTheta), np.cos(dTheta) ) # now in [-np.pi, np.pi]
+        dTheta = normalize_angle(dTheta) # now in [-np.pi, np.pi]
         
         # If large dTheta, just rotate
         min_dTheta_for_just_rotation = (1/3)*np.pi
@@ -218,13 +192,17 @@ class PathPlanner:
         w, # rotational velocity
         theta_0, 
         num_timesteps = 10, # self.num_substeps 
-        t_horizon = 1 # self.timestep
+        t_horizon = 1, # self.timestep
+        starting_node: Node = None
     ):
         # Compute a set of waypoints provided a velocity (m/s) and rotational velocity (rad/s)
         # A starting theta is required to compute dX and dY in the global frame.
         # +w is rotation CCW
         #
-        # Output dX, dY, dTheta is in the global, inertial frame. 
+        # If starting_node is None:
+        #   Output dX, dY, dTheta is in the global, inertial frame.
+        # Else:
+        #   Output X, Y, Theta in the global, intertial frame
         #
         # Compute <num_timesteps> timesteps evenly spaced @ <dt> second increments
         #
@@ -268,6 +246,13 @@ class PathPlanner:
         else:
             xs = [(v/w) * ( np.sin(theta_0 + w*t) - np.sin(theta_0) )]
             ys = [(v/w) * (-np.cos(theta_0 + w*t) + np.cos(theta_0) )]
+            
+        # Account for starting node
+        if starting_node is not None:
+            x_i, y_i, theta_i = starting_node.get_pose()
+            xs = [x + x_i for x in xs]
+            ys = [y + y_i for y in ys]
+            thetas = [normalize_angle(theta+theta_i) for theta in thetas]
         
         # Return trajectory
         return np.vstack( (xs, ys, thetas) )
@@ -364,6 +349,28 @@ class PathPlanner:
         
         # Return occupied cells
         return np.array(occ_cells)
+    
+    def point_collision_free(self, point):
+        # If the (x,y) coordinate in the map is white: it's free.
+        # If it's black: it's a wall
+        return self.occupancy_map[
+            point[1], # y-coordinate is column, indexed first
+            point[0] # x-coordinate is row, indexed
+        ]
+    
+    def trajectory_collision_free(self, traj):
+        # Get occupied cells
+        points = traj[:2, :]
+        occupied_raw = self.points_to_robot_circle(points)
+        
+        # Unique coordinates
+        # Eliminate (x,y) overlapping from several points in the trajectory
+        occupied = np.unique(occupied_raw.transpose(0, 2, 1).reshape(-1,2), axis=1)
+        for point in occupied:
+            # Fail if any point is a collision
+            if not self.point_collision_free(point):
+                return False
+        return True
 
     # Note: If you have correctly completed all previous functions, then you should be able to create a working RRT function
 

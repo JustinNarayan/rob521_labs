@@ -12,7 +12,7 @@ from scipy.linalg import block_diag
 
 # needed to make this work on Windows
 # import pygame_utils
-import rob521_labs.lab2.nodes.pygame_utils as pygame_utils
+import rob521_lab2.nodes.pygame_utils as pygame_utils
 
 def normalize_angle(angle):
     return np.atan2( np.sin(angle), np.cos(angle) ) # now in [-np.pi, np.pi]
@@ -20,7 +20,7 @@ def normalize_angle(angle):
 def load_map(filename):
     # Get the filepath
     full_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "lab2", "maps", filename)
+        os.path.join(os.path.dirname(__file__), "..", "..", "rob521_lab2", "maps", filename)
     )
     
     # Load
@@ -35,7 +35,7 @@ def load_map(filename):
 def load_map_yaml(filename):
     # Get the filepath
     full_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "lab2", "maps", filename)
+        os.path.join(os.path.dirname(__file__), "..", "..", "rob521_lab2", "maps", filename)
     )
     
     # Load
@@ -46,12 +46,22 @@ def load_map_yaml(filename):
 
 # Node for building a graph
 class Node:
-    def __init__(self, pose, parent_id, cost):
+    def __init__(self, pose, id, parent_id, cost):
+        self.id = id
         self.pose = pose  # A 3 by 1 vector [x, y, theta]
         self.parent_id = parent_id  # The parent node id that leads to this node (There should only every be one parent in RRT)
         self.cost = cost  # The cost to come to this node
         self.children_ids = []  # The children node ids of this node
         return
+    
+    def add_child(self, child_id):
+        self.children_ids.append(child_id)        
+    
+    def get_cost(self):
+        return self.cost
+    
+    def get_id(self):
+        return self.id
 
     def get_pose(self):
         return self.pose
@@ -92,7 +102,8 @@ class PathPlanner:
         self.num_substeps = 10
 
         # Planning storage
-        self.nodes = [Node(np.zeros((3, 1)), -1, 0)]
+        self.next_id_to_assign = 0
+        self.nodes = [] # Node(np.zeros((3, 1)), 0, -1, 0)
 
         # RRT* Specific Parameters
         self.lebesgue_free = (
@@ -115,16 +126,57 @@ class PathPlanner:
             self.stopping_dist,
         )
         return
+    
+    # Get the next id
+    def get_new_id(self):
+        # auto-increment ids
+        id = self.next_id_to_assign
+        self.next_id_to_assign += 1
+        return id
+    
+    # Get node by id
+    def get_node_by_id(self, id):
+        # find node by id, not a very efficient algorithm
+        # can be made more efficient if self.nodes is strategically organized
+        for node in self.nodes:
+            if node.get_id() == id:
+                return node
+        return None
+    
+    # Add node
+    def add_node(self, pose, parent_id=None, cost_from_parent=0):
+        new_id = self.get_new_id()
+        parent_node = self.get_node_by_id(parent_id)
+        parent_node.add_child(new_id)
+        new_node = Node(
+            pose,
+            new_id,
+            parent_id,
+            parent_node.get_cost() + cost_from_parent
+        )
+        self.nodes.append(new_node)
 
     # Functions required for RRT
-    def sample_map_space(self):
+    def sample_map_space(self, subset_x=None, subset_y=None):
         # Return an [x,y] coordinate to drive the robot towards
-        print("TO DO: Sample point to drive towards")
-        return np.zeros((2, 1))
+        # self.map_shape is height, width i.e. y, x
+        x = np.random.randint(
+            0 if subset_x is None else subset_x[0],
+            self.map_shape[1] if subset_x is None else subset_x[1]
+        )
+        y = np.random.randint(
+            0 if subset_y is None else subset_y[0],
+            self.map_shape[0] if subset_y is None else subset_y[1]
+        )
+        return np.vstack((x, y))
 
     def check_if_duplicate(self, point):
-        # Check if point is a duplicate of an already existing node
-        print("TO DO: Check that nodes are not duplicates")
+        # Check if any node has the same [x,y]
+        x, y = point
+        for node in self.nodes:
+            x_n, y_n = node.get_pose()[:2]
+            if x is x_n and y is y_n:
+                return True
         return False
 
     def closest_node(self, point):
@@ -141,7 +193,7 @@ class PathPlanner:
                 closest_id = i
 
         return closest_id
-
+    
     def simulate_trajectory(self, node_i: Node, point_s):
         # IN PROGRESS
         #

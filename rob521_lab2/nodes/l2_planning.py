@@ -11,7 +11,7 @@ from scipy.linalg import block_diag
 
 # needed to make this work on Windows
 # import pygame_utils
-import lab2.nodes.pygame_utils as pygame_utils
+import rob521_labs.lab2.nodes.pygame_utils as pygame_utils
 
 
 def load_map(filename):

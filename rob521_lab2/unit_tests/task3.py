@@ -27,17 +27,17 @@ print(coords)
 
 # subset
 print('subset')
-coords = path_planner.sample_map_space(subset_x=[500,510], subset_y=[300,310])
+coords = path_planner.sample_map_space(bounds=np.array([ [500, 510], [300, 310] ]))
 '''
-Within subset
+Within subset of x={500,510}, y={300,310}
 '''
 print(coords)
 
 ### Check if duplicate
-path_planner.nodes = [
-    Node([5, 4, 0], 0, 0, 0),
-    Node([10, 3, 30], 1, 0, 0)
-]
+path_planner.nodes = {
+    1: Node([5, 4, 0], 0, 0),
+    2: Node([10, 3, 30], 0, 0)
+}
 
 # new node
 print('new node')
@@ -63,7 +63,7 @@ Should be false.
 '''
 print(is_dupe)
 
-# repeat node, same theta
+# repeat node
 print('repeat node')
 is_dupe = path_planner.check_if_duplicate([10, 3])
 '''
@@ -71,8 +71,16 @@ Should be true.
 '''
 print(is_dupe)
 
+# repeat node, very close
+print('repeat node, very close')
+is_dupe = path_planner.check_if_duplicate([5, 4+1e-4])
+'''
+Should be true.
+'''
+print(is_dupe)
+
 ### Closest node
-path_planner.nodes = [] # empty
+path_planner.nodes = {} # empty
 
 # no nodes
 print('no nodes')
@@ -83,7 +91,7 @@ Should be None, no nodes.
 print(closest_id)
 
 # one node
-path_planner.nodes.append(Node([3, 3, 0], 0, -1, 0))
+path_planner.nodes[0] = Node([3, 3, 0], -1, 0)
 print('one node')
 closest_id = path_planner.closest_node([6, 30])
 '''
@@ -92,7 +100,7 @@ Should be 0, only node.
 print(closest_id)
 
 # a closer node
-path_planner.nodes.append(Node([6, 29, 0], 1, 0, 0))
+path_planner.nodes[1] = Node([6, 29, 0], 0, 0)
 print('a closer node')
 closest_id = path_planner.closest_node([6, 30])
 '''
@@ -101,9 +109,9 @@ Should be 1, closer node.
 print(closest_id)
 
 # more nodes, arbitrary
-path_planner.nodes.append(Node([5, 28, 0], 2, 1, 0))
-path_planner.nodes.append(Node([7, 31, 0], 3, 1, 0))
-path_planner.nodes.append(Node([6.5, 29.5, 0], 4, 3, 0))
+path_planner.nodes[2] = Node([5, 28, 0], 1, 0)
+path_planner.nodes[3] = Node([7, 31, 0], 1, 0)
+path_planner.nodes[4] = Node([6.5, 29.5, 0], 3, 0)
 print('more nodes, arbitrary')
 closest_id = path_planner.closest_node([6, 30])
 '''

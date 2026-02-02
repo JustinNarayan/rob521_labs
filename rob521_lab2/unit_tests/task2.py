@@ -51,7 +51,7 @@ print(trajectory)
 
 # Starting node
 print('starting node')
-node_init = Node([5, 5, np.pi/4], 0, 0, 0)
+node_init = Node([5, 5, np.pi/4], 0, 0)
 trajectory = path_planner.trajectory_rollout(v=0.05, w=0.25, theta_0=0.5*np.pi, num_timesteps=4, t_horizon=2, starting_node=node_init)
 '''
 Robot start moving straight up and slightly rotates to the left, but from (5, 5, 45 degrees)
@@ -62,7 +62,7 @@ print(trajectory)
 ### Robot Controller
 
 # Straight ahead
-node_i = Node( (0,0,np.pi), 0, 0, 0 )
+node_i = Node( (0,0,np.pi), 0, 0 )
 v,w = path_planner.robot_controller(
     node_i, (-5, 0)
 )
@@ -107,7 +107,7 @@ print(v,w)
 # IN PROGRESS
 
 # Free path 1
-node_i = Node( (0,0,0), 0, 0, 0 )
+node_i = Node( (0,0,0), 0, 0 )
 trajectory = path_planner.simulate_trajectory(node_i, (10,0))
 '''
 For this map, this is a free path. Should be valid increasing in X.
@@ -115,7 +115,7 @@ For this map, this is a free path. Should be valid increasing in X.
 print(trajectory)
 
 # Free path 2
-node_i = Node( (10,78.8,np.pi/2), 0, 0, 0 )
+node_i = Node( (10,78.8,np.pi/2), 0, 0 )
 trajectory = path_planner.simulate_trajectory(node_i, (10,100))
 '''
 For this map, this is a free path. Should be valid decreasing in Y.
@@ -123,7 +123,7 @@ For this map, this is a free path. Should be valid decreasing in Y.
 print(trajectory)
 
 # Free path 3
-node_i = Node( (10,78.8,np.pi/2), 0, 0, 0 )
+node_i = Node( (10,78.8,np.pi/2), 0, 0 )
 trajectory = path_planner.simulate_trajectory(node_i, (9,0))
 '''
 For this map, this is a free path. Should be rotating from pi (up) CCW to down-left (increasing theta).
@@ -131,7 +131,7 @@ For this map, this is a free path. Should be rotating from pi (up) CCW to down-l
 print(trajectory)
 
 # Collision path
-node_i = Node( (61,78.6,np.pi/2), 0, 0, 0 )
+node_i = Node( (61,78.6,np.pi/2), 0, 0 )
 trajectory = path_planner.simulate_trajectory(node_i, (61,100))
 '''
 For this map, this is a free path. Should be rotating from pi (up) CCW to down-left (increasing theta).

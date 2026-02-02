@@ -46,8 +46,7 @@ def load_map_yaml(filename):
 
 # Node for building a graph
 class Node:
-    def __init__(self, pose, id, parent_id, cost):
-        self.id = id
+    def __init__(self, pose, parent_id, cost):
         self.pose = pose  # A 3 by 1 vector [x, y, theta]
         self.parent_id = parent_id  # The parent node id that leads to this node (There should only every be one parent in RRT)
         self.cost = cost  # The cost to come to this node
@@ -59,9 +58,6 @@ class Node:
     
     def get_cost(self):
         return self.cost
-    
-    def get_id(self):
-        return self.id
 
     def get_pose(self):
         return self.pose
@@ -103,7 +99,7 @@ class PathPlanner:
 
         # Planning storage
         self.next_id_to_assign = 0
-        self.nodes = [] # Node(np.zeros((3, 1)), 0, -1, 0)
+        self.nodes = {}
 
         # RRT* Specific Parameters
         self.lebesgue_free = (
@@ -136,11 +132,9 @@ class PathPlanner:
     
     # Get node by id
     def get_node_by_id(self, id):
-        # find node by id, not a very efficient algorithm
-        # can be made more efficient if self.nodes is strategically organized
-        for node in self.nodes:
-            if node.get_id() == id:
-                return node
+        # find node by id, nodes is a dictionary
+        if id in self.nodes:
+            return self.nodes[id]
         return None
     
     # Add node
@@ -154,43 +148,49 @@ class PathPlanner:
             parent_id,
             parent_node.get_cost() + cost_from_parent
         )
-        self.nodes.append(new_node)
+        self.nodes[new_id] = new_node
 
     # Functions required for RRT
-    def sample_map_space(self, subset_x=None, subset_y=None):
+    def sample_map_space(self, bounds=None):
         # Return an [x,y] coordinate to drive the robot towards
         # self.map_shape is height, width i.e. y, x
-        x = np.random.randint(
-            0 if subset_x is None else subset_x[0],
-            self.map_shape[1] if subset_x is None else subset_x[1]
-        )
-        y = np.random.randint(
-            0 if subset_y is None else subset_y[0],
-            self.map_shape[0] if subset_y is None else subset_y[1]
-        )
+        
+        # Determine bounds
+        xmin, xmax, ymin, ymax = 0,0,0,0
+        if bounds is None:
+            xmin, xmax = self.bounds[0, :]
+            ymin, ymax = self.bounds[1, :]
+        else:
+            xmin, xmax = bounds[0, :]
+            ymin, ymax = bounds[1, :]
+        
+        x = np.random.randint(xmin, xmax)
+        y = np.random.randint(ymin, ymax)
         return np.vstack((x, y))
 
     def check_if_duplicate(self, point):
         # Check if any node has the same [x,y]
-        x, y = point
-        for node in self.nodes:
-            x_n, y_n = node.get_pose()[:2]
-            if x is x_n and y is y_n:
+        tol = 1e-3
+        
+        for id in self.nodes.keys():
+            node_xy = self.nodes[id].get_pose()[:2]
+            if np.linalg.norm(node_xy - np.array(point)) < tol:
                 return True
         return False
 
     def closest_node(self, point):
-        #finds closest node given an x,y point
+        # finds closest node given an x,y point
         min_dist = float("inf")
         closest_id = 0
-
-        for i, node in enumerate(self.nodes):
-            node_xy = node.point[:2]  # [x; y]
-            dist = np.linalg.norm(node_xy - point)
-
+        
+        # Iterate through nodes
+        for id in self.nodes.keys():
+            node_xy = self.nodes[id].pose[:2]  # [x; y]
+            dist = np.linalg.norm(node_xy - np.array(point))
+            
             if dist < min_dist:
                 min_dist = dist
-                closest_id = i
+                closest_id = id
 
         return closest_id
     

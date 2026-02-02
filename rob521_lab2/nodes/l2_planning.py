@@ -128,9 +128,19 @@ class PathPlanner:
         return False
 
     def closest_node(self, point):
-        # Returns the index of the closest node
-        print("TO DO: Implement a method to get the closest node to a sapled point")
-        return 0
+        #finds closest node given an x,y point
+        min_dist = float("inf")
+        closest_id = 0
+
+        for i, node in enumerate(self.nodes):
+            node_xy = node.point[:2]  # [x; y]
+            dist = np.linalg.norm(node_xy - point)
+
+            if dist < min_dist:
+                min_dist = dist
+                closest_id = i
+
+        return closest_id
 
     def simulate_trajectory(self, node_i: Node, point_s):
         # IN PROGRESS

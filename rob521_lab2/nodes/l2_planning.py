@@ -2,6 +2,7 @@
 # Standard Libraries
 import os
 import numpy as np
+from math import sqrt
 import yaml
 import pygame
 import time
@@ -13,6 +14,8 @@ from scipy.linalg import block_diag
 # import pygame_utils
 import rob521_labs.lab2.nodes.pygame_utils as pygame_utils
 
+def normalize_angle(angle):
+    return np.atan2( np.sin(angle), np.cos(angle) ) # now in [-np.pi, np.pi]
 
 def load_map(filename):
     # Get the filepath
@@ -43,13 +46,15 @@ def load_map_yaml(filename):
 
 # Node for building a graph
 class Node:
-    def __init__(self, point, parent_id, cost):
-        self.point = point  # A 3 by 1 vector [x, y, theta]
+    def __init__(self, pose, parent_id, cost):
+        self.pose = pose  # A 3 by 1 vector [x, y, theta]
         self.parent_id = parent_id  # The parent node id that leads to this node (There should only every be one parent in RRT)
         self.cost = cost  # The cost to come to this node
         self.children_ids = []  # The children node ids of this node
         return
 
+    def get_pose(self):
+        return self.pose
 
 # Path Planner
 class PathPlanner:
@@ -127,30 +132,132 @@ class PathPlanner:
         print("TO DO: Implement a method to get the closest node to a sapled point")
         return 0
 
-    def simulate_trajectory(self, node_i, point_s):
-        # Simulates the non-holonomic motion of the robot.
-        # This function drives the robot from node_i towards point_s. This function does has many solutions!
-        # node_i is a 3 by 1 vector [x;y;theta] this can be used to construct the SE(2) matrix T_{OI} in course notation
-        # point_s is the sampled point vector [x; y]
-        print("TO DO: Implment a method to simulate a trajectory given a sampled point")
-        vel, rot_vel = self.robot_controller(node_i, point_s)
+    def simulate_trajectory(self, node_i: Node, point_s):
+        # IN PROGRESS
+        #
+        # A starting node and goal point is selected.
+        # Both are given in the inertial frame.
+        # 
+        # Linear and rotation velocity commands are chosen for the robot in the global frame.
+        # These commands, plus the starting node are passed to the robot.
+        # A global output trajectory is produced:
+        #   - x,y coordinates in the global frame
+        #   - theta heading in the global frame
+        #
+        # The output trajectory is returned if there are no collisons; otherwise None
+        v, w = self.robot_controller(node_i, point_s)
+        trajectory = self.trajectory_rollout(v, w, node_i.get_pose()[2], starting_node=node_i)
+        
+        if self.trajectory_collision_free(trajectory):
+            return trajectory
+        return None
 
-        robot_traj = self.trajectory_rollout(vel, rot_vel)
-        return robot_traj
+    def robot_controller(self, node_i: Node, point_s):
+        # Node starts from (x_0, y_0, theta_0)
+        # Point contains (x,y)
+        # Generate a (v, w) pair to push the robot to (x, y, ?) from (x_0, y_0, theta_0)
+        
+        # Extract points
+        x_0, y_0, theta_0 = node_i.get_pose()
+        x, y = point_s
+        
+        # Compute errors
+        dX, dY = x - x_0, y - y_0
+        dist = sqrt(dX**2 + dY**2)
+        theta = np.atan2(dY, dX)
+        dTheta = theta - theta_0
+        dTheta = normalize_angle(dTheta) # now in [-np.pi, np.pi]
+        
+        # If large dTheta, just rotate
+        min_dTheta_for_just_rotation = (1/3)*np.pi
+        v,w = 0,0
+        if abs(dTheta) > min_dTheta_for_just_rotation:
+            v = 0
+            w = self.rot_vel_max * np.sign(dTheta)
+        
+        # Simple proportional controller
+        else:
+            K_v, K_w = 0.5, 1.0 # prioritize rotation
+            v = np.clip(
+                K_v * dist, 0, self.vel_max
+            )
+            w = np.clip(
+                K_w * dTheta, -self.rot_vel_max, self.rot_vel_max
+            )
+        
+        # Return
+        return v, w
 
-    def robot_controller(self, node_i, point_s):
-        # This controller determines the velocities that will nominally move the robot from node i to node s
-        # Max velocities should be enforced
-        print(
-            "TO DO: Implement a control scheme to drive you towards the sampled point"
-        )
-        return 0, 0
-
-    def trajectory_rollout(self, vel, rot_vel):
-        # Given your chosen velocities determine the trajectory of the robot for your given timestep
-        # The returned trajectory should be a series of points to check for collisions
-        print("TO DO: Implement a way to rollout the controls chosen")
-        return np.zeros((3, self.num_substeps))
+    def trajectory_rollout(
+        self, 
+        v, # velocity 
+        w, # rotational velocity
+        theta_0, 
+        num_timesteps = 10, # self.num_substeps 
+        t_horizon = 1, # self.timestep
+        starting_node: Node = None
+    ):
+        # Compute a set of waypoints provided a velocity (m/s) and rotational velocity (rad/s)
+        # A starting theta is required to compute dX and dY in the global frame.
+        # +w is rotation CCW
+        #
+        # If starting_node is None:
+        #   Output dX, dY, dTheta is in the global, inertial frame.
+        # Else:
+        #   Output X, Y, Theta in the global, intertial frame
+        #
+        # Compute <num_timesteps> timesteps evenly spaced @ <dt> second increments
+        #
+        # Unicycle model:
+        # |   x_dot   |   | cos(theta) 0 | | v |
+        # |   y_dot   | = | sin(theta) 0 | | w |
+        # | theta_dot |   |     0      1 |
+        #
+        # -> x_dot = cos(theta) * v
+        # -> y_dot = sin(theta) * v
+        # -> theta_dot = w
+        #
+        # To get timesteps, we need to integrate:
+        # 
+        # -> dX     = (v/w) ( sin(theta_0 + w*t) - sin(theta_0))
+        # -> dY     = (v/w) (-cos(theta_0 + w*t) + cos(theta_0))
+        # -> dTheta = w*t
+        #
+        # If w=0 and it's a straight line:
+        #
+        # -> dX     = v*t*cos(theta_0)
+        # -> dY     = v*t*sin(theta_0)
+        # -> dTheta = 0
+        #
+        # Output trajectory: 3x<num_timesteps>:
+        # | [dX1,     dX2,     ...]
+        # | [dY1,     dY2,     ...]
+        # | [dTheta1, dTheta2, ...]
+        
+        # Time
+        t = np.linspace(0, t_horizon, num_timesteps)
+        
+        # Compute trajectory
+        xs, ys = [], []
+        thetas = w * t # same regardless of w
+        # w = 0
+        if w == 0:
+            xs = [ v * t * np.cos(theta_0) ]
+            ys = [ v * t * np.sin(theta_0) ]
+        # w != 0
+        else:
+            xs = [(v/w) * ( np.sin(theta_0 + w*t) - np.sin(theta_0) )]
+            ys = [(v/w) * (-np.cos(theta_0 + w*t) + np.cos(theta_0) )]
+            
+        # Account for starting node
+        if starting_node is not None:
+            x_i, y_i, theta_i = starting_node.get_pose()
+            xs = [x + x_i for x in xs]
+            ys = [y + y_i for y in ys]
+            thetas = [normalize_angle(theta+theta_i) for theta in thetas]
+        
+        # Return trajectory
+        return np.vstack( (xs, ys, thetas) )
 
     def point_to_cell(self, points):
         # points: a series of (2xN) points of interest from the map reference
@@ -244,6 +351,32 @@ class PathPlanner:
         
         # Return occupied cells
         return np.array(occ_cells)
+    
+    def point_collision_free(self, point):
+        # IN PROGRESS
+        #
+        # If the (x,y) coordinate in the map is white: it's free.
+        # If it's black: it's a wall
+        return self.occupancy_map[
+            point[1], # y-coordinate is column, indexed first
+            point[0] # x-coordinate is row, indexed
+        ]
+    
+    def trajectory_collision_free(self, traj):
+        # IN PROGRESS
+        #
+        # Get occupied cells
+        points = traj[:2, :]
+        occupied_raw = self.points_to_robot_circle(points)
+        
+        # Unique coordinates
+        # Eliminate (x,y) overlapping from several points in the trajectory
+        occupied = np.unique(occupied_raw.transpose(0, 2, 1).reshape(-1,2), axis=1)
+        for point in occupied:
+            # Fail if any point is a collision
+            if not self.point_collision_free(point):
+                return False
+        return True
 
     # Note: If you have correctly completed all previous functions, then you should be able to create a working RRT function
 

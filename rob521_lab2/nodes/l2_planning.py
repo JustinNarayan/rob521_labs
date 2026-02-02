@@ -118,34 +118,13 @@ class PathPlanner:
 
     # Functions required for RRT
     def sample_map_space(self):
-        while True:
-            x = np.random.uniform(self.bounds[0, 0], self.bounds[0, 1])
-            y = np.random.uniform(self.bounds[1, 0], self.bounds[1, 1])
-
-            point = np.array([[x], [y]])
-            cell = self.point_to_cell(point)
-
-            cx, cy = int(cell[0, 0]), int(cell[1, 0])
-
-            if (
-                cx < 0 or cx >= self.map_shape[1] or
-                cy < 0 or cy >= self.map_shape[0]
-            ):
-                continue
-
-            if self.occupancy_map[cy, cx]:
-                return point
+        # Return an [x,y] coordinate to drive the robot towards
+        print("TO DO: Sample point to drive towards")
+        return np.zeros((2, 1))
 
     def check_if_duplicate(self, point):
-        # point: 2x1 [x; y]
-        tol = 1e-3  #tolerance
-
-        for node in self.nodes:
-            node_xy = node.point[:2]  #extract x, y
-            dist = np.linalg.norm(node_xy - point)
-            if dist < tol:
-                return True
-
+        # Check if point is a duplicate of an already existing node
+        print("TO DO: Check that nodes are not duplicates")
         return False
 
     def closest_node(self, point):
@@ -444,7 +423,7 @@ class PathPlanner:
         # This function performs RRT on the given map and robot
         # You do not need to demonstrate this function to the TAs, but it is left in for you to check your work
         for i in range(
-            25
+            1
         ):  # Most likely need more iterations than this to complete the map!
             # Sample map space
             point = self.sample_map_space()
@@ -457,33 +436,11 @@ class PathPlanner:
                 self.nodes[closest_node_id].point, point
             )
 
-            occ_cells = self.points_to_robot_circle(trajectory_o[:2, :]) 
-            collision = False
-            for disk_cells in occ_cells:
-                xs, ys = disk_cells
-                if np.any(self.occupancy_map[ys, xs] == 0):  
-                    collision = True
-                    break
-            if collision:
-                continue  # skip and sample new
+            # Check for collisions
+            print("TO DO: Check for collisions and add safe points to list of nodes.")
 
-            # Add the last point of trajectory as new node (sampled point)
-            new_point = trajectory_o[:, -1].reshape(3, 1)  # x, y, theta
-            if self.check_if_duplicate(new_point[:2]):
-                continue
-
-            # Create new node using last point in trajectory
-            new_node = Node(new_point, closest_node_id, 0) 
-            self.nodes.append(new_node)
-            self.nodes[closest_node_id].children_ids.append(len(self.nodes) - 1)
-
-            #check if goal has been reached
-            last_pos = new_point[:2]
-            goal_dist = np.linalg.norm(last_pos - self.goal_point)
-            # Halt metric is related to the stopping dist.
-            if goal_dist < self.stopping_dist:
-                break
-        
+            # Check if goal has been reached
+            print("TO DO: Check if at goal point.")
         return self.nodes
 
     def rrt_star_planning(self):

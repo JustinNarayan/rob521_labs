@@ -103,7 +103,8 @@ Expect some forward and CCW movement.
 print(v,w)
 
 
-### Simulate Trajectory # IN PROGRESS
+### Simulate Trajectory 
+# IN PROGRESS
 
 # Free path 1
 node_i = Node( (0,0,0), 0, 0 )

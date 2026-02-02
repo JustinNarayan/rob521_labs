@@ -133,6 +133,8 @@ class PathPlanner:
         return 0
 
     def simulate_trajectory(self, node_i: Node, point_s):
+        # IN PROGRESS
+        #
         # A starting node and goal point is selected.
         # Both are given in the inertial frame.
         # 
@@ -351,6 +353,8 @@ class PathPlanner:
         return np.array(occ_cells)
     
     def point_collision_free(self, point):
+        # IN PROGRESS
+        #
         # If the (x,y) coordinate in the map is white: it's free.
         # If it's black: it's a wall
         return self.occupancy_map[
@@ -359,6 +363,8 @@ class PathPlanner:
         ]
     
     def trajectory_collision_free(self, traj):
+        # IN PROGRESS
+        #
         # Get occupied cells
         points = traj[:2, :]
         occupied_raw = self.points_to_robot_circle(points)

@@ -16,20 +16,30 @@ from visualization_msgs.msg import Marker
 # ros and se2 conversion utils
 import utils
 
-
+# Goal Tolerances
 TRANS_GOAL_TOL = 0.1  # m, tolerance to consider a goal complete
 ROT_GOAL_TOL = 0.3  # rad, tolerance to consider a goal complete
+
+# Options for Velocities
 TRANS_VEL_OPTS = [0, 0.025, 0.13, 0.26]  # m/s, max of real robot is .26
 ROT_VEL_OPTS = np.linspace(-1.82, 1.82, 11)  # rad/s, max of real robot is 1.82
+
+# Control frequency
 CONTROL_RATE = 5  # Hz, how frequently control signals are sent
+
+# Time horizon simulation
 CONTROL_HORIZON = 5  # seconds. if this is set too high and INTEGRATION_DT is too low, code will take a long time to run!
 INTEGRATION_DT = 0.025  # s, delta t to propagate trajectories forward by
+
+# Collision Checks
 COLLISION_RADIUS = 0.225  # m, radius from base_link to use for collisions, min of 0.2077 based on dimensions of .281 x .306
+
+# Heuristics
 ROT_DIST_MULT = 0.1  # multiplier to change effect of rotational distance in choosing correct control
-OBS_DIST_MULT = (
-    0.1  # multiplier to change the effect of low distance to obstacles on a path
-)
+OBS_DIST_MULT = (0.1)  # multiplier to change the effect of low distance to obstacles on a path
 MIN_TRANS_DIST_TO_USE_ROT = TRANS_GOAL_TOL  # m, robot has to be within this distance to use rot distance in cost
+
+# Output file name
 PATH_NAME = "path.npy"  # saved path from l2_planning.py, should be in the same directory as this file
 
 # here are some hardcoded paths to use if you want to develop l2_planning and this file in parallel
@@ -105,15 +115,15 @@ class PathFollower:
         cur_dir = os.path.dirname(os.path.realpath(__file__))
 
         # to use the temp hardcoded paths above, switch the comment on the following two lines
-        self.path_tuples = np.load(os.path.join(cur_dir, "path.npy")).T
-        # self.path_tuples = np.array(TEMP_HARDCODE_PATH)
+        # self.path_tuples = np.load(os.path.join(cur_dir, "path.npy")).T
+        self.path_tuples = np.array(TEMP_HARDCODE_PATH)
 
         self.path = utils.se2_pose_list_to_path(self.path_tuples, "map")
         self.global_path_pub.publish(self.path)
 
         # goal
-        self.cur_goal = np.array(self.path_tuples[0])
         self.cur_path_index = 0
+        self.cur_goal = np.array(self.path_tuples[self.cur_path_index])
 
         # trajectory rollout tools
         # self.all_opts is a Nx2 array with all N possible combinations of the t and v vels, scaled by integration dt
@@ -129,6 +139,7 @@ class PathFollower:
             self.all_opts = np.delete(self.all_opts, all_zeros_index, axis=0)
         self.all_opts_scaled = self.all_opts * INTEGRATION_DT
 
+        # Collection path options to integrate
         self.num_opts = self.all_opts_scaled.shape[0]
         self.horizon_timesteps = int(np.ceil(CONTROL_HORIZON / INTEGRATION_DT))
 

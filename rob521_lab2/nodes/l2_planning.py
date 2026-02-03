@@ -236,7 +236,7 @@ class PathPlanner:
         #
         # No collision checking
         v, w = self.robot_controller(node_i, point_s)
-        return self.trajectory_rollout(v, w, node_i.get_pose()[2], starting_node=node_i)
+        return self.trajectory_rollout(v, w, node_i.get_pose())
 
     def robot_controller(self, node_i: Node, point_s):
         # Node starts from (x_0, y_0, theta_0)
@@ -277,8 +277,7 @@ class PathPlanner:
         self, 
         v, # velocity 
         w, # rotational velocity
-        theta_0,
-        starting_node: Node = None
+        starting_pose
     ):
         # Compute a set of waypoints provided a velocity (m/s) and rotational velocity (rad/s)
         # A starting theta is required to compute dX and dY in the global frame.
@@ -320,24 +319,25 @@ class PathPlanner:
         # Time
         t = np.linspace(0, self.timestep, self.num_substeps)
         
+        # Initial pose
+        x_i, y_i, theta_i = starting_pose.flatten()
+        
         # Compute trajectory
         xs, ys = [], []
         thetas = w * t # same regardless of w
         # w = 0
         if w == 0:
-            xs = v * t * np.cos(theta_0)
-            ys = v * t * np.sin(theta_0)
+            xs = v * t * np.cos(theta_i)
+            ys = v * t * np.sin(theta_i)
         # w != 0
         else:
-            xs = (v/w) * ( np.sin(theta_0 + w*t) - np.sin(theta_0) )
-            ys = (v/w) * (-np.cos(theta_0 + w*t) + np.cos(theta_0) )
+            xs = (v/w) * ( np.sin(theta_i + w*t) - np.sin(theta_i) )
+            ys = (v/w) * (-np.cos(theta_i + w*t) + np.cos(theta_i) )
             
-        # Account for starting node
-        if starting_node is not None:
-            x_i, y_i, theta_i = starting_node.get_pose()
-            xs = xs + x_i
-            ys = ys + y_i
-            thetas = normalize_angle(thetas+theta_i)
+        # Account for starting pose
+        xs = xs + x_i
+        ys = ys + y_i
+        thetas = normalize_angle(thetas+theta_i)
         
         # Return trajectory
         return np.vstack( (xs, ys, thetas) )

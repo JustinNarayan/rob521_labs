@@ -12,15 +12,23 @@ from scipy.linalg import block_diag
 
 # needed to make this work on Windows
 # import pygame_utils
-import rob521_labs.lab2.nodes.pygame_utils as pygame_utils
+import rob521_lab2.nodes.pygame_utils as pygame_utils
 
 def normalize_angle(angle):
     return np.atan2( np.sin(angle), np.cos(angle) ) # now in [-np.pi, np.pi]
 
+def vdist(v1, v2):
+    return np.linalg.norm(v1.flatten() - v2.flatten())
+
+def heading(p1, p2):
+    x1, y1 = p1
+    x2, y2 = p2
+    return np.atan2(y2-y1, x2-x1)
+
 def load_map(filename):
     # Get the filepath
     full_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "lab2", "maps", filename)
+        os.path.join(os.path.dirname(__file__), "..", "..", "rob521_lab2", "maps", filename)
     )
     
     # Load
@@ -35,7 +43,7 @@ def load_map(filename):
 def load_map_yaml(filename):
     # Get the filepath
     full_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "lab2", "maps", filename)
+        os.path.join(os.path.dirname(__file__), "..", "..", "rob521_lab2", "maps", filename)
     )
     
     # Load
@@ -52,6 +60,12 @@ class Node:
         self.cost = cost  # The cost to come to this node
         self.children_ids = []  # The children node ids of this node
         return
+    
+    def add_child(self, child_id):
+        self.children_ids.append(child_id)        
+    
+    def get_cost(self):
+        return self.cost
 
     def get_pose(self):
         return self.pose
@@ -77,11 +91,21 @@ class PathPlanner:
             self.map_settings_dict["origin"][1]
             + self.map_shape[0] * self.map_settings_dict["resolution"]
         )
+        self.search_dist_around_node = 10 # search [-15, 15] around closest node to goal in (x,y)
+        
+        # For willow, trim the edges
+        if map_filename == "willowgarageworld_05res.png":
+            self.bounds = np.array([
+                [0, 50],
+                [-47, 13]
+            ])
 
         # Robot information
         self.robot_radius = 0.22  # m
-        self.vel_max = 0.5  # m/s (Feel free to change!)
-        self.rot_vel_max = 0.2  # rad/s (Feel free to change!)
+        self.vel_max = 0.4  # m/s (Feel free to change!)
+        self.rot_vel_max = 2.5  # rad/s (Feel free to change!)
+        self.min_dTheta_for_just_rotation = 0.6*np.pi
+        self.min_dTheta_for_closest = 0.4*np.pi
 
         # Goal Parameters
         self.goal_point = goal_point  # m
@@ -92,7 +116,10 @@ class PathPlanner:
         self.num_substeps = 10
 
         # Planning storage
-        self.nodes = [Node(np.zeros((3, 1)), -1, 0)]
+        self.nodes = {
+            0: Node(np.array([0,0,0]), -1, 0)
+        }
+        self.next_id_to_assign = 1
 
         # RRT* Specific Parameters
         self.lebesgue_free = (
@@ -108,45 +135,98 @@ class PathPlanner:
         # Pygame window for visualization
         self.window = pygame_utils.PygameWindow(
             "Path Planner",
-            (1000, 1000),
+            (self.map_shape[1] * 0.5, self.map_shape[0] * 0.5),
+            map_filename,
             self.occupancy_map.shape,
             self.map_settings_dict,
             self.goal_point,
             self.stopping_dist,
         )
         return
+    
+    # Get the next id
+    def get_new_id(self):
+        # auto-increment ids
+        id = self.next_id_to_assign
+        self.next_id_to_assign += 1
+        return id
+    
+    # Get node by id
+    def get_node_by_id(self, id):
+        # find node by id, nodes is a dictionary
+        if id in self.nodes:
+            return self.nodes[id]
+        return None
+    
+    # Add node
+    def add_node(self, pose, parent_id=None, cost_from_parent=0):
+        new_id = self.get_new_id()
+        parent_node = self.get_node_by_id(parent_id)
+        parent_node.add_child(new_id)
+        new_node = Node(
+            pose,
+            parent_id,
+            parent_node.get_cost() + cost_from_parent
+        )
+        self.nodes[new_id] = new_node
 
     # Functions required for RRT
-    def sample_map_space(self):
+    def sample_map_space(self, bounds=None):
         # Return an [x,y] coordinate to drive the robot towards
-        print("TO DO: Sample point to drive towards")
-        return np.zeros((2, 1))
+        # self.map_shape is height, width i.e. y, x
+        # Determine bounds
+        xmin, xmax = self.bounds[0, :]
+        ymin, ymax = self.bounds[1, :]
+        
+        if bounds is not None:
+            # Get intersection of bounds within true map bounds
+            xmin_spec, xmax_spec = bounds[0, :]
+            ymin_spec, ymax_spec = bounds[1, :]
+            xmin, ymin = max(xmin, xmin_spec), max(ymin, ymin_spec)
+            xmax, ymax = min(xmax, xmax_spec), min(ymax, ymax_spec)
+        
+        x = np.random.randint(xmin, xmax)
+        y = np.random.randint(ymin, ymax)
+        return np.vstack((x, y))
 
-    def check_if_duplicate(self, point):
-        # Check if point is a duplicate of an already existing node
-        print("TO DO: Check that nodes are not duplicates")
+    def check_if_duplicate(self, pose):
+        # Check if any node has the same [x,y]
+        tol_pos = 2e-4
+        tol_theta = np.pi*0.01
+        
+        for id in self.nodes.keys():
+            node_pose = self.nodes[id].get_pose()
+            
+            if (
+                (vdist(node_pose[:2], np.array(pose[:2])) < tol_pos) and
+                (abs(normalize_angle(pose[2] - node_pose[2])) < tol_theta)
+            ):
+                return True
         return False
 
-    def closest_node(self, point):
-        #finds closest node given an x,y point
+    def closest_node(self, point, consider_heading=True):
+        # finds closest node given an x,y point
         min_dist = float("inf")
         closest_id = 0
-
-        for i, node in enumerate(self.nodes):
-            node_xy = node.point[:2]  # [x; y]
-            dist = np.linalg.norm(node_xy - point)
-
+        # Iterate through nodes
+        for id in self.nodes.keys():
+            node_pose = self.nodes[id].pose
+            node_xy = node_pose[:2]
+            
+            # Omit nodes that are not straight ahead
+            theta_from_node = heading(node_xy, point)
+            if abs(normalize_angle(theta_from_node - node_pose[2])) > self.min_dTheta_for_closest:
+                continue
+            
+            # Calculate distance
+            dist = vdist(node_xy, np.array(point))
             if dist < min_dist:
                 min_dist = dist
-                closest_id = i
-
+                closest_id = id
         return closest_id
-
+    
     def simulate_trajectory(self, node_i: Node, point_s):
-        # IN PROGRESS
-        #
-        # A starting node and goal point is selected.
-        # Both are given in the inertial frame.
+        # A starting node and goal point is selected in meters.
         # 
         # Linear and rotation velocity commands are chosen for the robot in the global frame.
         # These commands, plus the starting node are passed to the robot.
@@ -154,13 +234,9 @@ class PathPlanner:
         #   - x,y coordinates in the global frame
         #   - theta heading in the global frame
         #
-        # The output trajectory is returned if there are no collisons; otherwise None
+        # No collision checking
         v, w = self.robot_controller(node_i, point_s)
-        trajectory = self.trajectory_rollout(v, w, node_i.get_pose()[2], starting_node=node_i)
-        
-        if self.trajectory_collision_free(trajectory):
-            return trajectory
-        return None
+        return self.trajectory_rollout(v, w, node_i.get_pose()[2], starting_node=node_i)
 
     def robot_controller(self, node_i: Node, point_s):
         # Node starts from (x_0, y_0, theta_0)
@@ -179,9 +255,8 @@ class PathPlanner:
         dTheta = normalize_angle(dTheta) # now in [-np.pi, np.pi]
         
         # If large dTheta, just rotate
-        min_dTheta_for_just_rotation = (1/3)*np.pi
         v,w = 0,0
-        if abs(dTheta) > min_dTheta_for_just_rotation:
+        if abs(dTheta) > self.min_dTheta_for_just_rotation:
             v = 0
             w = self.rot_vel_max * np.sign(dTheta)
         
@@ -252,19 +327,19 @@ class PathPlanner:
         thetas = w * t # same regardless of w
         # w = 0
         if w == 0:
-            xs = [ v * t * np.cos(theta_0) ]
-            ys = [ v * t * np.sin(theta_0) ]
+            xs = v * t * np.cos(theta_0)
+            ys = v * t * np.sin(theta_0)
         # w != 0
         else:
-            xs = [(v/w) * ( np.sin(theta_0 + w*t) - np.sin(theta_0) )]
-            ys = [(v/w) * (-np.cos(theta_0 + w*t) + np.cos(theta_0) )]
+            xs = (v/w) * ( np.sin(theta_0 + w*t) - np.sin(theta_0) )
+            ys = (v/w) * (-np.cos(theta_0 + w*t) + np.cos(theta_0) )
             
         # Account for starting node
         if starting_node is not None:
             x_i, y_i, theta_i = starting_node.get_pose()
-            xs = [x + x_i for x in xs]
-            ys = [y + y_i for y in ys]
-            thetas = [normalize_angle(theta+theta_i) for theta in thetas]
+            xs = xs + x_i
+            ys = ys + y_i
+            thetas = normalize_angle(thetas+theta_i)
         
         # Return trajectory
         return np.vstack( (xs, ys, thetas) )
@@ -354,39 +429,51 @@ class PathPlanner:
             [x], [y] = cells[:, i].reshape(2, 1)
             
             # Get all occupied cells
-            xs, ys = disk( (x, y), radius_px, shape=self.map_shape)
+            ymax, xmax = self.map_shape
+            xs, ys = disk( (x, y), radius_px, shape=(xmax, ymax))
             
             # Add to output
+            if len(xs) == 0:
+                continue
             occ_cells.append(np.vstack([ xs, ys ]))
         
         # Return occupied cells
-        return np.array(occ_cells)
+        return occ_cells
     
-    def point_collision_free(self, point):
-        # IN PROGRESS
-        #
+    def cell_collision_free(self, cell):
         # If the (x,y) coordinate in the map is white: it's free.
         # If it's black: it's a wall
+        # Cell dimensions not checked -- assume valid positions.
+        # If this fails due to dimensions, it means cells have been mismapped elsewhere.
         return self.occupancy_map[
-            point[1], # y-coordinate is column, indexed first
-            point[0] # x-coordinate is row, indexed
+            cell[1], # y-coordinate is column, indexed first
+            cell[0] # x-coordinate is row, indexed second
         ]
     
-    def trajectory_collision_free(self, traj):
-        # IN PROGRESS
-        #
-        # Get occupied cells
-        points = traj[:2, :]
-        occupied_raw = self.points_to_robot_circle(points)
+    def cells_collision_free(self, cells):
+        # Check if a set of sets of cells is collision free
+        # Each outer set is a "starting point".
+        # Each inner set is the cells occupied if at that "starting point".
+        # Cells is a list of length N or np arrays of shape (2, M)
+        # N is the number of sets of cells.
+        # M is the number of cells in a sets.
+        num_cells_sets = len(cells)
+        collisions = np.ones(num_cells_sets)
         
-        # Unique coordinates
-        # Eliminate (x,y) overlapping from several points in the trajectory
-        occupied = np.unique(occupied_raw.transpose(0, 2, 1).reshape(-1,2), axis=1)
-        for point in occupied:
-            # Fail if any point is a collision
-            if not self.point_collision_free(point):
-                return False
-        return True
+        for i in range(num_cells_sets): # Each set of cells
+            these_cells = cells[i].reshape(2, -1)
+            num_cells = these_cells.shape[1]
+            # Iterate through cells and check if collision free
+            for cell_i in range(num_cells):
+                cell = these_cells[:, cell_i]
+                collision_free = self.cell_collision_free(cell)
+                
+                if not collision_free:
+                    collisions[i] = 0 # collision!
+                    continue
+        
+        # For each set (of sets of cells), 0 = Collisions, 1 = No Collision
+        return collisions
 
     # Note: If you have correctly completed all previous functions, then you should be able to create a working RRT function
 
@@ -419,28 +506,97 @@ class PathPlanner:
         return
 
     # Planner Functions
-    def rrt_planning(self):
-        # This function performs RRT on the given map and robot
-        # You do not need to demonstrate this function to the TAs, but it is left in for you to check your work
+    def rrt_planning(self):        
+        # RRT
+        max_iterations = int(1e8)
+        tol = self.stopping_dist # m
+        
         for i in range(
-            1
-        ):  # Most likely need more iterations than this to complete the map!
+            max_iterations
+        ):
+            # Draw pygame
+            for event in pygame.event.get():
+                pass
+                # if event.type == pygame.QUIT:
+                #     pygame.quit()
+                #     return self.nodes  # exit planning safely
+            
+            # Debug message
+            if (i % 500 == 0) and i>0:
+                print(f'iteration: {i}')
+                
             # Sample map space
-            point = self.sample_map_space()
+            # Sample points around the closest node to the goal
+            closest_node_id_to_goal = self.closest_node(self.goal_point, consider_heading=False)
+            near_x, near_y = self.nodes[closest_node_id_to_goal].get_pose()[:2]
+            bounds_to_search = np.array([
+                [near_x - self.search_dist_around_node, near_x + self.search_dist_around_node],
+                [near_y - self.search_dist_around_node, near_y + self.search_dist_around_node],
+            ])
+            
+            # Every few searches check the goal node
+            if (i % 20 == 0):
+                bounds_to_search = np.array([
+                    [self.goal_point[0] - 0.5, self.goal_point[0] + 0.5],
+                    [self.goal_point[1] - 0.5, self.goal_point[1] + 0.5]
+                ])
+            
+            point = self.sample_map_space(bounds=bounds_to_search)
 
-            # Get the closest point
+            # Get the closest nod
             closest_node_id = self.closest_node(point)
 
             # Simulate driving the robot towards the closest point
             trajectory_o = self.simulate_trajectory(
-                self.nodes[closest_node_id].point, point
+                self.nodes[closest_node_id], point
             )
-
-            # Check for collisions
-            print("TO DO: Check for collisions and add safe points to list of nodes.")
-
-            # Check if goal has been reached
-            print("TO DO: Check if at goal point.")
+            
+            # Pose is the end of the trajectory
+            final_pose = trajectory_o[:, -1]
+            
+            # Do not bother if duplicate
+            if self.check_if_duplicate(final_pose):
+                continue
+            
+            # Get cells occupied by trajectory
+            occ_cells = self.points_to_robot_circle(trajectory_o[:2, :]) # omit theta
+            
+            # Check if cells colliding
+            cells_collision_free = self.cells_collision_free(occ_cells)
+            collision = np.any(cells_collision_free == 0)
+            
+            # Add node if safe
+            if not collision:
+                # Parent ID is the closest node
+                parent_id = closest_node_id
+                parent_pose = self.nodes[closest_node_id].get_pose()
+                # Cost is the Euclidean distance between final pose and parent
+                # This is an arbitrary cost. Less intensive than arc length.
+                cost_from_parent = vdist(final_pose[:2], parent_pose[:2])
+                # Add node
+                self.add_node(final_pose, parent_id, cost_from_parent)
+                
+                # PyGame drawing
+                xf, yf = final_pose[:2]
+                self.window.add_point(
+                    [xf,yf],
+                    radius=1.5,
+                    color=pygame_utils.COLORS['b']
+                )
+                xp, yp = parent_pose[:2]
+                
+                self.window.add_line(
+                    [xp, yp],
+                    [xf, yf],
+                    width=1,
+                    color=pygame_utils.COLORS['g']
+                )
+                
+                # Check if we are at the goal
+                dist_to_goal = vdist(final_pose[:2], self.goal_point)
+                if dist_to_goal < tol:
+                    break
+        self.window.save("success.png")
         return self.nodes
 
     def rrt_star_planning(self):

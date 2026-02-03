@@ -4,7 +4,7 @@ warnings.simplefilter("ignore", category=UserWarning)
 
 # Imports
 import numpy as np
-from lab2.nodes.l2_planning import PathPlanner
+from rob521_lab2.nodes.l2_planning import PathPlanner
 
 ### Set up Path Planner
 # map info

@@ -103,7 +103,7 @@ class PathPlanner:
         # Robot information
         self.robot_radius = 0.22  # m
         self.vel_max = 0.4  # m/s (Feel free to change!)
-        self.rot_vel_max = 2.5  # rad/s (Feel free to change!)
+        self.rot_vel_max = 1  # rad/s (Feel free to change!)
         self.min_dTheta_for_just_rotation = 0.6*np.pi
         self.min_dTheta_for_closest = 0.4*np.pi
 
@@ -277,9 +277,7 @@ class PathPlanner:
         self, 
         v, # velocity 
         w, # rotational velocity
-        theta_0, 
-        num_timesteps = 10, # self.num_substeps 
-        t_horizon = 1, # self.timestep
+        theta_0,
         starting_node: Node = None
     ):
         # Compute a set of waypoints provided a velocity (m/s) and rotational velocity (rad/s)
@@ -320,7 +318,7 @@ class PathPlanner:
         # | [dTheta1, dTheta2, ...]
         
         # Time
-        t = np.linspace(0, t_horizon, num_timesteps)
+        t = np.linspace(0, self.timestep, self.num_substeps)
         
         # Compute trajectory
         xs, ys = [], []
@@ -485,15 +483,65 @@ class PathPlanner:
             self.gamma_RRT * (np.log(card_V) / card_V) ** (1.0 / 2.0), self.epsilon
         )
 
-    def connect_node_to_point(self, node_i, point_f):
-        # Given two nodes find the non-holonomic path that connects them
-        # Settings
-        # node is a 3 by 1 node
-        # point is a 2 by 1 point
-        print(
-            "TO DO: Implement a way to connect two already existing nodes (for rewiring)."
-        )
-        return np.zeros((3, self.num_substeps))
+    def connect_node_to_point(self, node_i: Node, point_f):
+        # Construct a trajectory from a starting pose to a final point. 
+        # Final heading does not matter.
+        # To guarantee arrival at the point, execute a turn maneuver to align the heading.
+        # Then move straight.
+        # Assume point is NOT a duplicate of node.
+        
+        # Extract information
+        x, y, theta = node_i.get_pose()
+        x_f, y_f = point_f
+        sec_per_step = self.timestep / self.num_substeps
+        vel_max_eff = self.vel_max * sec_per_step # scaled to timestamp
+        rot_vel_max_eff = self.rot_vel_max * sec_per_step # scaled to timestamp
+        
+        # Rotation step
+        target_heading = heading([x, y], [x_f, y_f])
+        heading_error = normalize_angle(target_heading - theta)
+
+        # Compute steps for rotational trajectory
+        steps_to_rotate = max(int(np.ceil(abs(heading_error/rot_vel_max_eff))), 1) # guarantee one step
+        
+        # Create the required rotation steps
+        traj_r = []
+        for i in range(steps_to_rotate - 1):
+            # Rotate
+            theta += rot_vel_max_eff * np.sign(heading_error)
+            # Required rotation steps up to, but not including, final heading
+            traj_r.append([x, y, theta])
+        
+        # Append final step
+        theta = target_heading
+        traj_r.append([x, y, theta])
+        
+        # Format as 3xN, with x, y, theta as rows
+        traj_r = np.array(traj_r).T
+        
+        # Translation step
+        dist = np.hypot(x_f-x, y_f-y)
+        
+        # Compute steps for linear trajectory
+        steps_to_translate = max(int(np.ceil(dist / vel_max_eff)), 1) # guarantee one 
+        
+        # Create the required translation steps
+        traj_t = []
+        for i in range(steps_to_translate - 1):
+            # Move
+            x += vel_max_eff * np.cos(theta)
+            y += vel_max_eff * np.sin(theta)
+            # Required translations steps up to, but not including, final position
+            traj_t.append([x, y, theta])
+        
+        # Append final step
+        traj_t.append([x_f, y_f, target_heading])
+        
+        # Format as 3xN, with x, y, theta as rows
+        traj_t = np.array(traj_t).T
+        
+        # Append trajectories
+        return np.hstack([traj_r, traj_t])
 
     def cost_to_come(self, trajectory_o):
         # The cost to get to a node from lavalle

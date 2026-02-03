@@ -320,7 +320,7 @@ class PathPlanner:
         t = np.linspace(0, self.timestep, self.num_substeps)
         
         # Initial pose
-        x_i, y_i, theta_i = starting_pose.flatten()
+        x_i, y_i, theta_i = np.array(starting_pose).flatten()
         
         # Compute trajectory
         xs, ys = [], []
@@ -543,10 +543,31 @@ class PathPlanner:
         # Append trajectories
         return np.hstack([traj_r, traj_t])
 
-    def cost_to_come(self, trajectory_o):
-        # The cost to get to a node from lavalle
-        print("TO DO: Implement a cost to come metric")
-        return 0
+    def cost_to_come(self, traj):
+        # Segment lengths
+        lengths = vdist(traj[:2, 1:], traj[:2, :-1])
+        
+        # Orientation change
+        theta_diffs = normalize_angle(np.diff(traj[2, :]))
+        
+        # Approximate control "effort"
+        dt = self.timestep / self.num_substeps
+        v = lengths / dt
+        w = theta_diffs / dt
+        
+        # Costs (tunable)
+        K_lengths = 1
+        K_theta = 0.1
+        K_control = 0.01 * dt
+        
+        # Compute cost
+        cost = np.sum(
+            K_lengths*lengths + \
+            K_theta*theta_diffs + \
+            K_control*(v**2 + w**2)*dt
+        )
+        
+        return cost
 
     def update_children(self, node_id):
         # Given a node_id with a changed cost, update all connected nodes with the new cost
@@ -618,11 +639,12 @@ class PathPlanner:
                 # Parent ID is the closest node
                 parent_id = closest_node_id
                 parent_pose = self.nodes[closest_node_id].get_pose()
-                # Cost is the Euclidean distance between final pose and parent
-                # This is an arbitrary cost. Less intensive than arc length.
-                cost_from_parent = vdist(final_pose[:2], parent_pose[:2])
                 # Add node
-                self.add_node(final_pose, parent_id, cost_from_parent)
+                self.add_node(
+                    final_pose, 
+                    parent_id, 
+                    cost_from_parent=self.cost_to_come(trajectory_o)
+                )
                 
                 # PyGame drawing
                 xf, yf = final_pose[:2]

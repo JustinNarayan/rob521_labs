@@ -19,7 +19,7 @@ path_planner = PathPlanner(
 
 # No velocity
 print('no velocity')
-trajectory = path_planner.trajectory_rollout(v=0, w=0, theta_0=0.25*np.pi)
+trajectory = path_planner.trajectory_rollout(v=0, w=0, starting_pose=np.array([0,0,0.25*np.pi]))
 '''
 Robot is stationary
 '''
@@ -27,7 +27,7 @@ print(trajectory)
 
 # Linear velocity
 print('linear velocity')
-trajectory = path_planner.trajectory_rollout(v=0.5, w=0, theta_0=0.75*np.pi, num_timesteps=4, t_horizon=1)
+trajectory = path_planner.trajectory_rollout(v=0.5, w=0, starting_pose=np.array([0,0,0.75*np.pi]))
 '''
 Robot moves in the -X and +Y direction (left, up in the robot frame)
 '''
@@ -35,7 +35,7 @@ print(trajectory)
 
 # Rotational velocity
 print('rotational velocity')
-trajectory = path_planner.trajectory_rollout(v=0, w=-0.25, theta_0=0, num_timesteps=4, t_horizon=1)
+trajectory = path_planner.trajectory_rollout(v=0, w=-0.25, starting_pose=np.array([0,0,0]))
 '''
 Robot rotates in CW direction (rotation from left to down)
 '''
@@ -43,7 +43,7 @@ print(trajectory)
 
 # Combined velocity
 print('combined velocity')
-trajectory = path_planner.trajectory_rollout(v=0.05, w=0.25, theta_0=0.5*np.pi, num_timesteps=4, t_horizon=2)
+trajectory = path_planner.trajectory_rollout(v=0.05, w=0.25, starting_pose=np.array([0,0,0.5*np.pi]))
 '''
 Robot start moving straight up and slightly rotates to the left
 '''
@@ -51,8 +51,7 @@ print(trajectory)
 
 # Starting node
 print('starting node')
-node_init = Node([5, 5, np.pi/4], 0, 0)
-trajectory = path_planner.trajectory_rollout(v=0.05, w=0.25, theta_0=0.5*np.pi, num_timesteps=4, t_horizon=2, starting_node=node_init)
+trajectory = path_planner.trajectory_rollout(v=0.05, w=0.25, starting_pose=np.array([5,5,0.25*np.pi]))
 '''
 Robot start moving straight up and slightly rotates to the left, but from (5, 5, 45 degrees)
 '''

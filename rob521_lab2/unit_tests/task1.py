@@ -64,7 +64,7 @@ For each point (there is 1), there will be a 2xM array within.
 M is the number of occupid cells. Each cell's coordinates are listed.
 The total shape should be 1x2xM
 '''
-print(cells.shape)
+print(np.array(cells).shape)
 print(cells)
 
 # Many cells
@@ -76,4 +76,4 @@ cells = path_planner.points_to_robot_circle(np.array([
 '''
 Should be 3x2xM
 '''
-print(cells.shape)
+print(np.array(cells).shape)

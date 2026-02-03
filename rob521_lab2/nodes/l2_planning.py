@@ -320,7 +320,7 @@ class PathPlanner:
         t = np.linspace(0, self.timestep, self.num_substeps)
         
         # Initial pose
-        x_i, y_i, theta_i = starting_pose.flatten()
+        x_i, y_i, theta_i = np.array(starting_pose).flatten()
         
         # Compute trajectory
         xs, ys = [], []

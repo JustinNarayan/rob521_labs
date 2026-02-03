@@ -27,7 +27,7 @@ print(coords)
 
 # subset
 print('subset')
-coords = path_planner.sample_map_space(bounds=np.array([ [500, 510], [300, 310] ]))
+coords = path_planner.sample_map_space(bounds=np.array([ [10, 20], [30, 40] ]))
 '''
 Within subset of x={500,510}, y={300,310}
 '''

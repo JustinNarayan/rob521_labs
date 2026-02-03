@@ -98,7 +98,7 @@ class PathFollower:
         self.map_odom_tf = self.tf_buffer.lookup_transform(
             "map", "odom", rospy.Time(0), rospy.Duration(2.0)
         ).transform
-        print(self.map_odom_tf)
+        # print(self.map_odom_tf)
 
         # subscribers and publishers
         self.cmd_pub = rospy.Publisher("/cmd_vel", Twist, queue_size=1)
@@ -111,23 +111,23 @@ class PathFollower:
         )
 
         # map
-        if MYHAL:
-            map_filename = "myhal.png"
-            occupancy_map = load_map(map_filename)
-            self.map_np = occupancy_map
-            self.map_resolution = 0.05
-            self.map_origin = np.array([0.2, 0.2, -0.0])
-            self.map_nonzero_idxes = np.argwhere(self.map_np)
-        else:
-            map = rospy.wait_for_message("/map", OccupancyGrid)
-            self.map_np = np.array(map.data).reshape(map.info.height, map.info.width)
-            self.map_resolution = round(map.info.resolution, 5)
-            self.map_origin = -utils.se2_pose_from_pose(
-                map.info.origin
-            )  # negative because of weird way origin is stored
-            print(self.map_origin)
-            self.map_nonzero_idxes = np.argwhere(self.map_np)
-            print(map)
+        # if MYHAL:
+        #     map_filename = "myhal.png"
+        #     occupancy_map = load_map(map_filename)
+        #     self.map_np = occupancy_map
+        #     self.map_resolution = 0.05
+        #     self.map_origin = np.array([0.2, 0.2, -0.0])
+        #     self.map_nonzero_idxes = np.argwhere(self.map_np)
+        # else:
+        map = rospy.wait_for_message("/map", OccupancyGrid)
+        self.map_np = np.array(map.data).reshape(map.info.height, map.info.width)
+        self.map_resolution = round(map.info.resolution, 5)
+        self.map_origin = -utils.se2_pose_from_pose(
+            map.info.origin
+        )  # negative because of weird way origin is stored
+        # print(self.map_origin)
+        self.map_nonzero_idxes = np.argwhere(self.map_np)
+        # print(map)
 
         # collisions
         self.collision_radius_pix = COLLISION_RADIUS / self.map_resolution
@@ -144,8 +144,8 @@ class PathFollower:
         self.collision_marker.color.a = 0.5
 
         # transforms
-        self.map_baselink_tf = self.tf_buffer.lookup_transform(
-            "map", "base_footprint" if MYHAL else "base_link", rospy.Time(0), rospy.Duration(2.0)
+        self.map_baselink_tf = self.tf_buffer.lookup_transform( # "base_footprint" if MYHAL else 
+            "map", "base_link", rospy.Time(0), rospy.Duration(2.0)
         )
         self.pose_in_map_np = np.zeros(3)
         self.pos_in_map_pix = np.zeros(2)
@@ -155,8 +155,8 @@ class PathFollower:
         cur_dir = os.path.dirname(os.path.realpath(__file__))
 
         # to use the temp hardcoded paths above, switch the comment on the following two lines
-        # self.path_tuples = np.load(os.path.join(cur_dir, "path.npy")).T
-        self.path_tuples = np.array(TEMP_HARDCODE_PATH)
+        self.path_tuples = np.load(os.path.join(cur_dir, "path_complete.npy")).T
+        # self.path_tuples = np.array(TEMP_HARDCODE_PATH)
 
         self.path = utils.se2_pose_list_to_path(self.path_tuples, "map")
         self.global_path_pub.publish(self.path)
@@ -296,8 +296,8 @@ class PathFollower:
 
     def update_pose(self):
         # Update numpy poses with current pose using the tf_buffer
-        self.map_baselink_tf = self.tf_buffer.lookup_transform(
-            "map",  "base_footprint" if MYHAL else "base_link", rospy.Time(0)
+        self.map_baselink_tf = self.tf_buffer.lookup_transform( # "base_footprint" if MYHAL else 
+            "map",  "base_link", rospy.Time(0)
         ).transform
         self.pose_in_map_np[:] = [
             self.map_baselink_tf.translation.x,

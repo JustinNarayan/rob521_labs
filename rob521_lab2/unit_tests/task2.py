@@ -104,36 +104,159 @@ print(v,w)
 
 
 ### Simulate Trajectory 
-# IN PROGRESS
 
-# Free path 1
+# Path 1
 node_i = Node( (0,0,0), 0, 0 )
 trajectory = path_planner.simulate_trajectory(node_i, (10,0))
 '''
-For this map, this is a free path. Should be valid increasing in X.
+Should be valid increasing in X.
 '''
 print(trajectory)
 
-# Free path 2
+# Path 2
 node_i = Node( (10,78.8,np.pi/2), 0, 0 )
 trajectory = path_planner.simulate_trajectory(node_i, (10,100))
 '''
-For this map, this is a free path. Should be valid decreasing in Y.
+Should be valid decreasing in Y.
 '''
 print(trajectory)
 
-# Free path 3
+# Path 3
 node_i = Node( (10,78.8,np.pi/2), 0, 0 )
 trajectory = path_planner.simulate_trajectory(node_i, (9,0))
 '''
-For this map, this is a free path. Should be rotating from pi (up) CCW to down-left (increasing theta).
+Should be rotating from pi (up) CCW to down-left (increasing theta).
 '''
 print(trajectory)
 
-# Collision path
-node_i = Node( (61,78.6,np.pi/2), 0, 0 )
-trajectory = path_planner.simulate_trajectory(node_i, (61,100))
+
+### Collision Checks
+# Arbitrary occupancy map. 1 = Free, 0 = Black
+path_planner.occupancy_map = np.array([
+    # y is indexed first for the row, x is indexed second for the col
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 0, 1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 0, 1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 0, 0, 1, 1, 1, 1, 1, 1, 1],
+    [1, 0, 0, 1, 1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+    [1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+    [1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+    [1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+])
+
+# Cell Collision checks
+print('free cell')
+free = path_planner.cell_collision_free(np.array([ [0], [0] ]))
 '''
-For this map, this is a free path. Should be rotating from pi (up) CCW to down-left (increasing theta).
+Free cell. Return 1.
 '''
-print(trajectory)
+print(free)
+
+print('free cell')
+free = path_planner.cell_collision_free(np.array([ [2], [1] ]))
+'''
+Free cell. Return 1.
+'''
+print(free)
+
+print('colliding cell')
+free = path_planner.cell_collision_free(np.array([ [1], [2] ]))
+'''
+Collision cell. Return 0.
+'''
+print(free)
+
+print('colliding cell')
+free = path_planner.cell_collision_free(np.array([ [8], [8] ]))
+'''
+Collision cell. Return 0.
+'''
+print(free)
+
+# Multi-cell Collision checks
+print('one free set')
+free_cells = path_planner.cells_collision_free(np.array([
+    # Set 1
+    [
+        [0, 1, 2], # x
+        [0, 0, 0] # y
+    ]
+]))
+'''
+Free cells.
+'''
+print(free_cells)
+
+print('two free sets')
+free_cells = path_planner.cells_collision_free(np.array([
+    # Set 1
+    [
+        [2, 3, 3], # x
+        [1, 1, 2]  # y
+    ],
+    # Set 2
+    [
+        [0, 1, 2], # x 
+        [7, 7, 7]  # y
+    ]
+]))
+'''
+Free cells.
+'''
+print(free_cells)
+
+print('two colliding sets, all colliding')
+free_cells = path_planner.cells_collision_free(np.array([
+    # Set 1
+    [
+        [1, 1, 2], # x
+        [1, 2, 3]  # y
+    ],
+    # Set 2
+    [
+        [7, 8, 9], # x 
+        [8, 8, 8]  # y
+    ]
+]))
+'''
+All colliding cells.
+'''
+print(free_cells)
+
+print('two colliding sets, mix of free and colliding')
+free_cells = path_planner.cells_collision_free(np.array([
+    # Set 1
+    [
+        [0, 1, 2], # x
+        [0, 0, 3]  # y
+    ],
+    # Set 2
+    [
+        [0, 1, 9], # x 
+        [8, 8, 8]  # y
+    ]
+]))
+'''
+Mix of free and colliding cells.
+'''
+print(free_cells)
+
+print('one colliding set and one free set.')
+free_cells = path_planner.cells_collision_free(np.array([
+    # Set 1
+    [
+        [0, 1, 2], # x
+        [0, 0, 3]  # y
+    ],
+    # Set 2
+    [
+        [0, 1, 2], # x 
+        [8, 8, 8]  # y
+    ]
+]))
+'''
+First set is a mix of colliding and free cells. Second set is free cells.
+'''
+print(free_cells)

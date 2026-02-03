@@ -14,6 +14,7 @@ class PygameWindow:
         self,
         name,
         size,
+        map_png,
         real_map_size_pixels,
         map_settings_dict,
         goal_point,
@@ -33,7 +34,7 @@ class PygameWindow:
         
         # Get the filepath
         full_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "rob521_lab2", "maps", "willowgarageworld_05res.png")
+            os.path.join(os.path.dirname(__file__), "..", "..", "rob521_lab2", "maps", map_png)
         )
         map_img = pygame.image.load(full_path)
         map_img = pygame.transform.scale(map_img, self.size)
@@ -101,6 +102,9 @@ class PygameWindow:
         )
         pygame.draw.line(self.screen, color, p1, p2, width)
         pygame.display.update()
+        
+    def save(self, file):
+        pygame.image.save(pygame.display.get_surface(), file)
 
     # def remove_line(self, p1, p2, width=1, color=COLORS['w']):
     #     pygame.draw.line(self.screen, color, p1, p2, width)

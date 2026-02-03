@@ -16,6 +16,9 @@ from visualization_msgs.msg import Marker
 # ros and se2 conversion utils
 import utils
 
+# Choose MYHAL or Not
+MYHAL = False
+
 # Goal Tolerances
 TRANS_GOAL_TOL = 0.1  # m, tolerance to consider a goal complete
 ROT_GOAL_TOL = 0.3  # rad, tolerance to consider a goal complete
@@ -51,6 +54,19 @@ TEMP_HARDCODE_PATH = [
     [1.5, -4.4, np.pi],
 ]  # some possible collisions
 
+# Map Handling Functions
+def load_map(filename):
+    import matplotlib.image as mpimg
+    import cv2
+
+    im = cv2.imread("../maps/" + filename)
+    im = cv2.flip(im, 0)
+    # im = mpimg.imread("../maps/" + filename)
+    if len(im.shape) > 2:
+        im = im[:, :, 0]
+    im_np = np.array(im)  # Whitespace is true, black is false
+    im_np = np.logical_not(im_np)  # for ros
+    return im_np
 
 class PathFollower:
     def __init__(self):
@@ -79,15 +95,23 @@ class PathFollower:
         )
 
         # map
-        map = rospy.wait_for_message("/map", OccupancyGrid)
-        self.map_np = np.array(map.data).reshape(map.info.height, map.info.width)
-        self.map_resolution = round(map.info.resolution, 5)
-        self.map_origin = -utils.se2_pose_from_pose(
-            map.info.origin
-        )  # negative because of weird way origin is stored
-        print(self.map_origin)
-        self.map_nonzero_idxes = np.argwhere(self.map_np)
-        print(map)
+        if MYHAL:
+            map_filename = "myhal.png"
+            occupancy_map = load_map(map_filename)
+            self.map_np = occupancy_map
+            self.map_resolution = 0.05
+            self.map_origin = np.array([0.2, 0.2, -0.0])
+            self.map_nonzero_idxes = np.argwhere(self.map_np)
+        else:
+            map = rospy.wait_for_message("/map", OccupancyGrid)
+            self.map_np = np.array(map.data).reshape(map.info.height, map.info.width)
+            self.map_resolution = round(map.info.resolution, 5)
+            self.map_origin = -utils.se2_pose_from_pose(
+                map.info.origin
+            )  # negative because of weird way origin is stored
+            print(self.map_origin)
+            self.map_nonzero_idxes = np.argwhere(self.map_np)
+            print(map)
 
         # collisions
         self.collision_radius_pix = COLLISION_RADIUS / self.map_resolution
@@ -105,7 +129,7 @@ class PathFollower:
 
         # transforms
         self.map_baselink_tf = self.tf_buffer.lookup_transform(
-            "map", "base_link", rospy.Time(0), rospy.Duration(2.0)
+            "map", "base_footprint" if MYHAL else "base_link", rospy.Time(0), rospy.Duration(2.0)
         )
         self.pose_in_map_np = np.zeros(3)
         self.pos_in_map_pix = np.zeros(2)
@@ -209,7 +233,7 @@ class PathFollower:
     def update_pose(self):
         # Update numpy poses with current pose using the tf_buffer
         self.map_baselink_tf = self.tf_buffer.lookup_transform(
-            "map", "base_link", rospy.Time(0)
+            "map",  "base_footprint" if MYHAL else "base_link", rospy.Time(0)
         ).transform
         self.pose_in_map_np[:] = [
             self.map_baselink_tf.translation.x,

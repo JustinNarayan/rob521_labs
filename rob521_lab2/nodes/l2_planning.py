@@ -97,7 +97,7 @@ class PathPlanner:
             self.map_settings_dict["origin"][1]
             + self.map_shape[0] * self.map_settings_dict["resolution"]
         )
-        self.search_dist_around_node = 10 # search [-15, 15] around closest node to goal in (x,y)
+        self.search_dist_around_node = 5 # search [-15, 15] around closest node to goal in (x,y)
         
         # For willow, trim the edges
         if map_filename == "willowgarageworld_05res.png":
@@ -108,8 +108,8 @@ class PathPlanner:
 
         # Robot information
         self.robot_radius = 0.22  # m
-        self.vel_max = 0.4  # m/s (Feel free to change!)
-        self.rot_vel_max = 1  # rad/s (Feel free to change!)
+        self.vel_max = 0.5  # m/s (Feel free to change!)
+        self.rot_vel_max = 2  # rad/s (Feel free to change!)
         self.min_dTheta_for_just_rotation = 0.6*np.pi
         self.min_dTheta_for_closest = 0.4*np.pi
 
@@ -551,7 +551,8 @@ class PathPlanner:
 
     def cost_to_come(self, traj):
         # Segment lengths
-        lengths = vdist(traj[:2, 1:], traj[:2, :-1])
+        diffs = traj[:2, 1:] - traj[:2, :-1]
+        lengths = np.linalg.norm(diffs, axis=0)
         
         # Orientation change
         theta_diffs = normalize_angle(np.diff(traj[2, :]))
@@ -607,6 +608,14 @@ class PathPlanner:
 
             # Recursively update grandchildren
             self.update_children(child_id)
+            
+    def is_ancestor(self, ancestor_id, node_id):
+        current = self.nodes[node_id].parent_id
+        while current != -1:
+            if current == ancestor_id:
+                return True
+            current = self.nodes[current].parent_id
+        return False
 
     # Planner Functions
     def rrt_planning(self):        
@@ -802,7 +811,7 @@ class PathPlanner:
                     best_parent_id = node_id
                     
             # Add new node with best parent
-            parent_pose = self.nodes[best_parent_id].get_cost()
+            parent_pose = self.nodes[best_parent_id].get_pose()
             self.add_node(
                 final_pose,
                 best_parent_id,
@@ -842,6 +851,9 @@ class PathPlanner:
                 
                 # If cheaper, rewire neighbor
                 if new_cost < neighbor_node.get_cost():
+                    # Prevent cycles
+                    if self.is_ancestor(node_id, new_node_id):
+                        continue
                     # Remove neighbor from its old parent’s child list
                     old_parent_id = neighbor_node.parent_id
                     self.nodes[old_parent_id].children_ids.remove(node_id)
@@ -861,7 +873,9 @@ class PathPlanner:
         self.window.save("success.png")
         return self.nodes
 
-    def recover_path(self, node_id=-1):
+    def recover_path(self, node_id=None):
+        if node_id == None:
+            node_id = self.next_id_to_assign-1 # should be last node
         path = [self.nodes[node_id].point]
         current_node_id = self.nodes[node_id].parent_id
         while current_node_id > -1:

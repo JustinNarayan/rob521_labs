@@ -57,7 +57,7 @@ class Node:
     def __init__(self, pose, parent_id, cost):
         self.pose = pose  # A 3 by 1 vector [x, y, theta]
         self.parent_id = parent_id  # The parent node id that leads to this node (There should only every be one parent in RRT)
-        self.cost = cost  # The cost to come to this node
+        self.cost = cost  # The total cost to come to this node
         self.children_ids = []  # The children node ids of this node
         return
     
@@ -69,6 +69,12 @@ class Node:
 
     def get_pose(self):
         return self.pose
+    
+    def get_children_ids(self):
+        return self.children_ids
+    
+    def set_cost(self, cost):
+        self.cost = cost
 
 # Path Planner
 class PathPlanner:
@@ -570,9 +576,37 @@ class PathPlanner:
         return cost
 
     def update_children(self, node_id):
-        # Given a node_id with a changed cost, update all connected nodes with the new cost
-        print("TO DO: Update the costs of connected nodes after rewiring.")
-        return
+        """
+        Recursively update the costs of all descendants of a node.
+        If a node gets a new cheaper parent, its cost decreases.
+        But then ALL of its children must also decrease accordingly,
+        because their cost-to-come depends on this node.
+        This function propagates the cost change downward through the tree.
+        """
+
+        # Get this node
+        node = self.nodes[node_id]
+
+        # Iterate through every child of this node
+        for child_id in node.get_children_ids():
+            child_node = self.nodes[child_id]
+
+            # The child cost should be:
+            # cost(parent) + cost(edge parent->child)
+            # Get parent cost
+            parent_cost = node.get_cost()
+            
+            # Get trajectory from parent to child
+            traj = self.connect_node_to_point(node, child_node.get_pose()[:2])
+            
+            # Get cost along trajectory
+            cost_to_come = self.cost_to_come(traj)
+
+            # Update child cost
+            child_node.set_cost(node.get_cost() + cost_to_come)
+
+            # Recursively update grandchildren
+            self.update_children(child_id)
 
     # Planner Functions
     def rrt_planning(self):        
@@ -670,32 +704,161 @@ class PathPlanner:
         return self.nodes
 
     def rrt_star_planning(self):
-        # This function performs RRT* for the given map and robot
-        for i in range(
-            1
-        ):  # Most likely need more iterations than this to complete the map!
-            # Sample
-            point = self.sample_map_space()
+        """
+        True RRT* Planning Algorithm
 
-            # Closest Node
+        Compared to RRT, RRT* adds:
+        --------------------------
+        1. Neighbor search in a shrinking radius ball
+        2. Best-parent selection (minimum cost-to-come)
+        3. Rewiring nearby nodes through the new node
+        4. Updating descendant costs after rewiring
+        """
+        
+        max_iterations = int(1e8)
+        tol = self.stopping_dist # m
+        
+        for i in range(
+            max_iterations
+        ):
+            # Draw pygame
+            for event in pygame.event.get():
+                pass
+            
+            # Debug message
+            if (i % 500 == 0) and i>0:
+                print(f'iteration: {i}')
+                
+            # Sample map space
+            # Sample points around the closest node to the goal
+            closest_node_id_to_goal = self.closest_node(self.goal_point, consider_heading=False)
+            near_x, near_y = self.nodes[closest_node_id_to_goal].get_pose()[:2]
+            bounds_to_search = np.array([
+                [near_x - self.search_dist_around_node, near_x + self.search_dist_around_node],
+                [near_y - self.search_dist_around_node, near_y + self.search_dist_around_node],
+            ])
+            
+            # Every few searches check the goal node
+            if (i % 20 == 0):
+                bounds_to_search = np.array([
+                    [self.goal_point[0] - 0.5, self.goal_point[0] + 0.5],
+                    [self.goal_point[1] - 0.5, self.goal_point[1] + 0.5]
+                ])
+            
+            point = self.sample_map_space(bounds=bounds_to_search)
+
+            # Get the closest nod
             closest_node_id = self.closest_node(point)
 
-            # Simulate trajectory
+            # Simulate driving the robot towards the closest point
             trajectory_o = self.simulate_trajectory(
-                self.nodes[closest_node_id].point, point
+                self.nodes[closest_node_id], point
             )
-
-            # Check for Collision
-            print("TO DO: Check for collision.")
-
-            # Last node rewire
-            print("TO DO: Last node rewiring")
-
-            # Close node rewire
-            print("TO DO: Near point rewiring")
-
-            # Check for early end
-            print("TO DO: Check for early end")
+            
+            # Pose is the end of the trajectory
+            final_pose = trajectory_o[:, -1]
+            
+            # Do not bother if duplicate
+            if self.check_if_duplicate(final_pose):
+                continue
+            
+            # Get cells occupied by trajectory
+            occ_cells = self.points_to_robot_circle(trajectory_o[:2, :]) # omit theta
+            
+            # Check if cells colliding
+            cells_collision_free = self.cells_collision_free(occ_cells)
+            if np.any(cells_collision_free == 0):
+                continue
+            
+            # Find all nodes within radius
+            radius = self.ball_radius()
+            neighbor_ids = []
+            for node_id in self.nodes.keys():
+                node_xy = self.nodes[node_id].get_pose()[:2]
+                if vdist(node_xy, final_pose[:2]) <= radius:
+                    neighbor_ids.append(node_id)
+                    
+            # Find best parent
+            best_parent_id = closest_node_id
+            best_cost = self.nodes[closest_node_id].get_cost() + self.cost_to_come(trajectory_o)
+            
+            # Try connecting through each neighbor
+            for node_id in neighbor_ids:
+                candidate_node = self.nodes[node_id]
+                # Generate trajectory from neighbor -> new node
+                traj_candidate = self.connect_node_to_point(candidate_node, final_pose[:2])
+                
+                # Collision check candidate trajectory
+                occ_cells = self.points_to_robot_circle(traj_candidate[:2, :])
+                if np.any(self.cells_collision_free(occ_cells) == 0):
+                    continue
+                
+                # Compute candidate cost
+                candidate_cost = candidate_node.get_cost() + self.cost_to_come(traj_candidate)
+                
+                # Pick cheapest parent
+                if candidate_cost < best_cost:
+                    best_cost = candidate_cost
+                    best_parent_id = node_id
+                    
+            # Add new node with best parent
+            parent_pose = self.nodes[best_parent_id].get_cost()
+            self.add_node(
+                final_pose,
+                best_parent_id,
+                cost_from_parent=best_cost - self.nodes[best_parent_id].get_cost()
+            )
+            new_node_id = self.next_id_to_assign - 1  # last assigned ID
+            
+            # PyGame drawing
+            xf, yf = final_pose[:2]
+            self.window.add_point(
+                [xf,yf],
+                radius=1.5,
+                color=pygame_utils.COLORS['b']
+            )
+            xp, yp = parent_pose[:2]
+            self.window.add_line(
+                [xp, yp],
+                [xf, yf],
+                width=1,
+                color=pygame_utils.COLORS['g']
+            )
+            
+            # Rewiring Step
+            new_node = self.nodes[new_node_id]
+            for node_id in neighbor_ids:
+                # Never rewire the parent itself
+                if node_id == best_parent_id:
+                    continue
+                neighbor_node = self.nodes[node_id]
+                
+                # Cost if rewired through new node
+                traj_rewire = self.simulate_trajectory(new_node, neighbor_node.get_pose()[:2])
+                occ_cells = self.points_to_robot_circle(traj_rewire[:2, :])
+                if np.any(self.cells_collision_free(occ_cells) == 0):
+                    continue
+                new_cost = new_node.get_cost() + self.cost_to_come(traj_rewire)
+                
+                # If cheaper, rewire neighbor
+                if new_cost < neighbor_node.get_cost():
+                    # Remove neighbor from its old parent’s child list
+                    old_parent_id = neighbor_node.parent_id
+                    self.nodes[old_parent_id].children_ids.remove(node_id)
+                    # Assign new parent
+                    neighbor_node.parent_id = new_node_id
+                    new_node.add_child(node_id)
+                    # Update neighbor cost
+                    neighbor_node.set_cost(new_cost)
+                    # Propagate cost update to its descendants
+                    self.update_children(node_id)
+                
+            # Check if we are at the goal
+            dist_to_goal = vdist(final_pose[:2], self.goal_point)
+            if dist_to_goal < tol:
+                break
+            
+        self.window.save("success.png")
         return self.nodes
 
     def recover_path(self, node_id=-1):

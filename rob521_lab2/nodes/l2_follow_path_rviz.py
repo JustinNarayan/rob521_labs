@@ -25,8 +25,8 @@ TRANS_GOAL_TOL = 0.15  # m, tolerance to consider a goal complete
 ROT_GOAL_TOL = 0.4  # rad, tolerance to consider a goal complete
 
 # Options for Velocities
-TRANS_VEL_OPTS = [0, 0.05, 0.1, 0.15]  # m/s, max of real robot is .26
-ROT_VEL_OPTS = np.linspace(-1.1, 1.1, 11)  # rad/s, max of real robot is 1.82
+TRANS_VEL_OPTS = [0, 0.05, 0.1, 0.25]  # m/s, max of real robot is .26
+ROT_VEL_OPTS = np.linspace(-1.1, 1.1, 9)  # rad/s, max of real robot is 1.82
 
 # Control frequency
 CONTROL_RATE = 5  # Hz, how frequently control signals are sent
@@ -41,7 +41,7 @@ HEURISTIC_RADII = [0.25, 0.275, 0.3, 0.325]
 HEURISTIC_RADII_INFINITE = 0.35 # this radii suggests robot is "infinitely far" from obstacles for purpose of cost. Ideal
 
 # Costs
-COST_LIN_DIST = 20 # per "m" for [0, inf] -> [good, bad]. 0 heuristic means at goal. inf heuristic means very far from goal.
+COST_LIN_DIST = 10 # per "m" for [0, inf] -> [good, bad]. 0 heuristic means at goal. inf heuristic means very far from goal.
 COST_ROT_DIST = 1 # per "rad" for [0, pi] -> [good, bad]. 0 heuristic means aligned with goal. pi heuristic means opposite from goal.
 COST_OBS_DIST = 1 # per "m" for [0, 1] -> [good, bad]. 0 heuristic means > 0.325 m away from obstacles. 0.1 means <= 0.25 m away from obstacles
 
@@ -65,7 +65,7 @@ TEMP_HARDCODE_PATH = [
 
 
 def normalize_angle(angle):
-    return np.arctan2( np.sin(angle), np.cos(angle) ) # now in [-np.pi, np.pi]
+    return (angle + np.pi) % (2*np.pi) - np.pi # now in [-np.pi, np.pi]
 
 def vdist(v1, v2):
     return np.linalg.norm(v1.flatten() - v2.flatten())
@@ -269,12 +269,14 @@ class PathFollower:
                         dists_from_obstacles[o] = radii
                         break
                 # If all checked radii were free, robot is far from obstacles.
+            # Scale dists from obstacles so 0 = "infinitely far"
+            adjusted_dists_from_obstacles = [dist-HEURISTIC_RADII_INFINITE for dist in dists_from_obstacles]
             
             # Calculate costs
             lin_cost = np.array([COST_LIN_DIST * dist for dist in lin_dists_to_goal]).flatten()
             rot_cost = np.array([COST_ROT_DIST * dist for dist in rot_dists_from_goal]).flatten()
-            obs_cost = np.array([COST_OBS_DIST * dist for dist in dists_from_obstacles]).flatten()
-            final_cost = (lin_cost + rot_cost).flatten()
+            obs_cost = np.array([COST_OBS_DIST * dist for dist in adjusted_dists_from_obstacles]).flatten()
+            final_cost = (lin_cost + rot_cost + obs_cost).flatten() 
             
             # Choose best cost
             if final_cost.size == 0:  # hardcoded recovery if all options have collision

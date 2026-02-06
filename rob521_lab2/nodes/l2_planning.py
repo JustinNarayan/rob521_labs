@@ -139,14 +139,7 @@ class PathPlanner:
 
         # Pygame window for visualization
         self.window = pygame_utils.PygameWindow(
-            "Path Planner",
-            (160 * 5, 50 * 5),
-            map_filename,
-            self.occupancy_map.shape,
-            self.map_settings_dict,
-            self.goal_point,
-            self.stopping_dist,
-        )
+            "Path Planner", (160*5, 50*5), self.occupancy_map.shape, self.map_settings_dict, self.goal_point, self.stopping_dist)
         return
     
     # Get the next id
@@ -454,7 +447,7 @@ class PathPlanner:
         return self.occupancy_map[
             cell[1], # y-coordinate is column, indexed first
             cell[0] # x-coordinate is row, indexed second
-        ]
+        ] < 255
     
     def cells_collision_free(self, cells):
         # Check if a set of sets of cells is collision free
@@ -666,6 +659,7 @@ class PathPlanner:
             
             # Pose is the end of the trajectory
             final_pose = trajectory_o[:, -1]
+            print(final_pose)
             
             # Do not bother if duplicate
             if self.check_if_duplicate(final_pose):
@@ -708,8 +702,8 @@ class PathPlanner:
                 
                 # Check if we are at the goal
                 dist_to_goal = vdist(final_pose[:2], self.goal_point)
-                # if dist_to_goal < tol:
-                    # break
+                if dist_to_goal < tol:
+                    break
         self.window.save("success.png")
         return self.nodes
 

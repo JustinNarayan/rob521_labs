@@ -11,9 +11,9 @@ import matplotlib.image as mpimg
 from skimage.draw import disk
 from scipy.linalg import block_diag
 
+MYHAL = True
 
 # needed to make this work on Windows
-# import pygame_utils
 import pygame_utils
 
 def normalize_angle(angle):
@@ -102,15 +102,14 @@ class PathPlanner:
             self.map_settings_dict["origin"][1]
             + self.map_shape[0] * self.map_settings_dict["resolution"]
         )
-        
         self.search_dist_around_node = 2 # search [-15, 15] around closest node to goal in (x,y)
 
         # Robot information
-        self.robot_radius = 0.2  # m
-        self.vel_max = 0.15  # m/s (Feel free to change!)
-        self.rot_vel_max = 0.12  # rad/s (Feel free to change!)
+        self.robot_radius = 0.4  # 0.225 m in reality
+        self.vel_max = 0.2  # m/s (Feel free to change!)
+        self.rot_vel_max = 0.5  # rad/s (Feel free to change!)
         self.min_dTheta_for_just_rotation = 0.8*np.pi
-        self.min_dTheta_for_closest = 2*np.pi
+        self.min_dTheta_for_closest = 0.35*np.pi
 
         # Goal Parameters
         self.goal_point = goal_point  # m
@@ -361,7 +360,11 @@ class PathPlanner:
         
         # Extract map properties
         res_m_per_px = self.map_settings_dict['resolution']
-        w_px, h_px = self.map_shape
+        w_px, h_px = None, None
+        if MYHAL:
+            h_px, w_px = self.map_shape
+        else:
+            w_px, h_px = self.map_shape
         w_m, h_m = w_px * res_m_per_px, h_px * res_m_per_px
         
         # "Origin" property is offset of map reference frame from the true origin
@@ -420,7 +423,7 @@ class PathPlanner:
         
         # Get cells from points
         cells = self.point_to_cell(points)
-        
+    
         # Get occupied cells from each center cell
         num_cells = cells.shape[1]
         for i in range(num_cells):
@@ -444,10 +447,47 @@ class PathPlanner:
         # If it's black: it's a wall
         # Cell dimensions not checked -- assume valid positions.
         # If this fails due to dimensions, it means cells have been mismapped elsewhere.
-        return self.occupancy_map[
-            cell[1], # y-coordinate is column, indexed first
-            cell[0] # x-coordinate is row, indexed second
-        ] < 255
+        if MYHAL:
+            # The occupancy map appears extremely finicky for Myhal
+            # Use the hardcoded obstacle locations in meters instead
+            # Locations are in the map-frame (i.e. 0 is the "top")
+            
+            # Map dimensions
+            res = self.map_settings_dict["resolution"]
+            h, w = np.array(self.map_shape) * res
+            o_x, o_y = np.array(self.map_settings_dict["origin"][:2])
+            
+            # Get position in meters in robot frame
+            robot_frame_x = cell[0] * res
+            robot_frame_y = cell[1] * res
+            
+            # Augment to map origin
+            x = robot_frame_x - o_x
+            y = robot_frame_y - o_y
+            
+            # Check if in bounds
+            dP = self.robot_radius / 1.5
+            if ( (x<-dP) or (x>w+dP) or (y<-dP) or (y>h+dP) ):
+                return False # wall
+            
+            # Check if in obstacle
+            for obs in self.map_settings_dict["obstacles"].values():
+                # Extract dimensions
+                obs_x, obs_y, obs_w, obs_h, _ = obs
+                x_l, x_r = obs_x, obs_x + obs_w
+                y_t, y_b = obs_y, obs_y + obs_h
+                
+                # Determine collision
+                if ( (x>x_l) and (x<x_r) ) and ( (y>y_t) and (y<y_b) ):
+                    return False
+                
+            # No collision
+            return True
+        else:
+            return self.occupancy_map[
+                cell[1], # y-coordinate is column, indexed first
+                cell[0] # x-coordinate is row, indexed second
+            ] < 255
     
     def cells_collision_free(self, cells):
         # Check if a set of sets of cells is collision free
@@ -659,14 +699,13 @@ class PathPlanner:
             
             # Pose is the end of the trajectory
             final_pose = trajectory_o[:, -1]
-            print(final_pose)
             
             # Do not bother if duplicate
             if self.check_if_duplicate(final_pose):
                 continue
             
             # Get cells occupied by trajectory
-            occ_cells = self.points_to_robot_circle(trajectory_o[:2, :]) # omit theta
+            occ_cells = self.points_to_robot_circle(trajectory_o[:2, :]) # omit 
             
             # Check if cells colliding
             cells_collision_free = self.cells_collision_free(occ_cells)
@@ -902,7 +941,7 @@ def main():
     node_path_metric = path_planner.recover_path()
 
     # Leftover test functions
-    np.save("shortest_path_rrt.npy", node_path_metric)
+    np.save("shortest_path_rrt_heuristic.npy", node_path_metric)
 
 
 if __name__ == "__main__":

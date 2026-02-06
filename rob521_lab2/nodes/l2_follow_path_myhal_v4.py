@@ -40,7 +40,7 @@ HEURISTIC_RADII_INFINITE = 0.35 # this radii suggests robot is "infinitely far" 
 # Costs
 COST_LIN_DIST = 10 # per "m" for [0, inf] -> [good, bad]. 0 heuristic means at goal. inf heuristic means very far from goal.
 COST_ROT_DIST = 1 # per "rad" for [0, pi] -> [good, bad]. 0 heuristic means aligned with goal. pi heuristic means opposite from goal.
-COST_OBS_DIST = 1 # per "m" for [0, 1] -> [good, bad]. 0 heuristic means > 0.325 m away from obstacles. 0.1 means <= 0.25 m away from obstacles
+COST_OBS_DIST = 3 # per "m" for [0, 1] -> [good, bad]. 0 heuristic means > 0.325 m away from obstacles. 0.1 means <= 0.25 m away from obstacles
 
 
 
@@ -121,7 +121,7 @@ class PathFollower():
         cur_dir = os.path.dirname(os.path.realpath(__file__))
 
         # to use the temp hardcoded paths above, switch the comment on the following two lines
-        self.path_tuples = np.load(os.path.join(cur_dir, 'shortest_path_rrt.npy')).T
+        self.path_tuples = np.load(os.path.join(cur_dir, 'shortest_path_rrt_heuristic.npy')).T
 
         self.path = utils.se2_pose_list_to_path(self.path_tuples, 'map')
         self.global_path_pub.publish(self.path)

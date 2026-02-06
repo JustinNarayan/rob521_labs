@@ -106,8 +106,8 @@ class PathPlanner:
 
         # Robot information
         self.robot_radius = 0.4  # 0.225 m in reality
-        self.vel_max = 0.2  # m/s (Feel free to change!)
-        self.rot_vel_max = 0.5  # rad/s (Feel free to change!)
+        self.vel_max = 0.15  # m/s (Feel free to change!)
+        self.rot_vel_max = 0.35  # rad/s (Feel free to change!)
         self.min_dTheta_for_just_rotation = 0.8*np.pi
         self.min_dTheta_for_closest = 0.35*np.pi
 
@@ -116,7 +116,7 @@ class PathPlanner:
         self.stopping_dist = stopping_dist  # m
 
         # Trajectory Simulation Parameters
-        self.timestep = 1  # s
+        self.timestep = 3  # s
         self.num_substeps = 20
 
         # Planning storage

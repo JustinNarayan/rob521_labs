@@ -18,15 +18,15 @@ from visualization_msgs.msg import Marker
 import utils
 
 # Goal Tolerances
-TRANS_GOAL_TOL = 0.15  # m, tolerance to consider a goal complete
-ROT_GOAL_TOL = 0.4  # rad, tolerance to consider a goal complete
+TRANS_GOAL_TOL = 0.3  # m, tolerance to consider a goal complete
+ROT_GOAL_TOL = 0.5  # rad, tolerance to consider a goal complete
 
 # Options for Velocities
-TRANS_VEL_OPTS = [0, 0.05, 0.1, 0.2]  # m/s, max of real robot is .26
-ROT_VEL_OPTS = np.linspace(-1.1, 1.1, 9)  # rad/s, max of real robot is 1.82
+TRANS_VEL_OPTS = [0, 0.025, 0.05, 0.15]  # m/s, max of real robot is .26
+ROT_VEL_OPTS = np.linspace(-1.4, 1.4, 9)  # rad/s, max of real robot is 1.82
 
 # Control frequency
-CONTROL_RATE = 5  # Hz, how frequently control signals are sent
+CONTROL_RATE = 3  # Hz, how frequently control signals are sent
 
 # Time horizon simulation
 CONTROL_HORIZON = 5  # seconds. if this is set too high and INTEGRATION_DT is too low, code will take a long time to run!
@@ -38,9 +38,9 @@ HEURISTIC_RADII = [0.25, 0.275, 0.3, 0.325]
 HEURISTIC_RADII_INFINITE = 0.35 # this radii suggests robot is "infinitely far" from obstacles for purpose of cost. Ideal
 
 # Costs
-COST_LIN_DIST = 10 # per "m" for [0, inf] -> [good, bad]. 0 heuristic means at goal. inf heuristic means very far from goal.
+COST_LIN_DIST = 2 # per "m" for [0, inf] -> [good, bad]. 0 heuristic means at goal. inf heuristic means very far from goal.
 COST_ROT_DIST = 1 # per "rad" for [0, pi] -> [good, bad]. 0 heuristic means aligned with goal. pi heuristic means opposite from goal.
-COST_OBS_DIST = 3 # per "m" for [0, 1] -> [good, bad]. 0 heuristic means > 0.325 m away from obstacles. 0.1 means <= 0.25 m away from obstacles
+COST_OBS_DIST = 0 # per "m" for [0, 1] -> [good, bad]. 0 heuristic means > 0.325 m away from obstacles. 0.1 means <= 0.25 m away from obstacles
 
 
 

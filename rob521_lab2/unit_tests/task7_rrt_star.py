@@ -1,6 +1,6 @@
 # Imports
 import numpy as np
-from rob521_lab2.nodes.l2_planning import PathPlanner, Node
+from nodes.l2_planning import PathPlanner, Node
 
 ### Set up Path Planner
 # map info
@@ -15,8 +15,8 @@ path_planner = PathPlanner(
 )
 
 ### RRT_PLANNING
-path_planner.rrt_planning()
+path_planner.rrt_star_planning()
 node_path_metric = np.hstack(path_planner.recover_path())
 
 # Leftover test functions
-np.save("shortest_path_rrt.npy", node_path_metric)
+np.save("shortest_path_rrt_star.npy", node_path_metric)

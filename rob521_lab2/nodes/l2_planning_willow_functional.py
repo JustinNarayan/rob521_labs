@@ -101,23 +101,29 @@ class PathPlanner:
             self.map_settings_dict["origin"][1]
             + self.map_shape[0] * self.map_settings_dict["resolution"]
         )
+        self.search_dist_around_node = 5 # search [-15, 15] around closest node to goal in (x,y)
         
-        self.search_dist_around_node = 2 # search [-15, 15] around closest node to goal in (x,y)
+        # For willow, trim the edges
+        if map_filename == "willowgarageworld_05res.png":
+            self.bounds = np.array([
+                [0, 50],
+                [-47, 13]
+            ])
 
         # Robot information
-        self.robot_radius = 0.2  # m
-        self.vel_max = 0.15  # m/s (Feel free to change!)
-        self.rot_vel_max = 0.12  # rad/s (Feel free to change!)
-        self.min_dTheta_for_just_rotation = 0.8*np.pi
-        self.min_dTheta_for_closest = 2*np.pi
+        self.robot_radius = 0.22  # m
+        self.vel_max = 0.5  # m/s (Feel free to change!)
+        self.rot_vel_max = 2  # rad/s (Feel free to change!)
+        self.min_dTheta_for_just_rotation = 0.6*np.pi
+        self.min_dTheta_for_closest = 0.4*np.pi
 
         # Goal Parameters
         self.goal_point = goal_point  # m
         self.stopping_dist = stopping_dist  # m
 
         # Trajectory Simulation Parameters
-        self.timestep = 1  # s
-        self.num_substeps = 20
+        self.timestep = 1.0  # s
+        self.num_substeps = 10
 
         # Planning storage
         self.nodes = {
@@ -139,7 +145,7 @@ class PathPlanner:
         # Pygame window for visualization
         self.window = pygame_utils.PygameWindow(
             "Path Planner",
-            (self.map_shape[1] * 8, self.map_shape[0] * 8),
+            (self.map_shape[1] * 0.5, self.map_shape[0] * 0.5),
             map_filename,
             self.occupancy_map.shape,
             self.map_settings_dict,
@@ -188,12 +194,9 @@ class PathPlanner:
             ymin_spec, ymax_spec = bounds[1, :]
             xmin, ymin = max(xmin, xmin_spec), max(ymin, ymin_spec)
             xmax, ymax = min(xmax, xmax_spec), min(ymax, ymax_spec)
-        
-        deltaX = xmax - xmin
-        deltaY = ymax - ymin
-        
-        x = (np.random.random() * deltaX) + xmin
-        y = (np.random.random() * deltaY) + ymin
+            
+        x = np.random.randint(xmin, xmax)
+        y = np.random.randint(ymin, ymax)
         return np.vstack((x, y))
 
     def check_if_duplicate(self, pose):
@@ -731,7 +734,6 @@ class PathPlanner:
         for i in range(
             max_iterations
         ):
-            
             # Draw pygame
             for event in pygame.event.get():
                 pass
@@ -880,35 +882,34 @@ class PathPlanner:
         
         last_node = self.nodes[last_node_id]
         path = []
-        path.append(np.array(last_node.get_pose()))
+        path.append(last_node.get_pose())
         parent_id = last_node.get_parent_id()
         while parent_id != -1:
             node = self.nodes[parent_id]
-            path.append(np.array(node.get_pose()))
+            path.append(node.get_pose())
             parent_id = node.get_parent_id()
         path.reverse()
-        path = np.array(path).T
         return path
 
 
 def main():
     # Set map information
-    map_filename = "myhal.png"
-    map_setings_filename = "myhal.yaml"
+    map_filename = "willowgarageworld_05res.png"
+    map_setings_filename = "willowgarageworld_05res.yaml"
 
     # robot information
-    goal_point = np.array([[7], [0]])  # m
-    stopping_dist = 0.2  # m
+    goal_point = np.array([[42], [-44]])  # m
+    stopping_dist = 0.5  # m
 
     # RRT precursor
     path_planner = PathPlanner(
         map_filename, map_setings_filename, goal_point, stopping_dist
     )
-    nodes = path_planner.rrt_planning()
-    node_path_metric = path_planner.recover_path()
+    nodes = path_planner.rrt_star_planning()
+    node_path_metric = np.hstack(path_planner.recover_path())
 
     # Leftover test functions
-    np.save("shortest_path_rrt.npy", node_path_metric)
+    np.save("shortest_path_rrt_star.npy", node_path_metric)
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ import matplotlib.image as mpimg
 from skimage.draw import disk
 from scipy.linalg import block_diag
 
+
 # needed to make this work on Windows
 # import pygame_utils
 import pygame_utils
@@ -29,7 +30,7 @@ def heading(p1, p2):
 def load_map(filename):
     # Get the filepath
     full_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "lab2", "maps", filename)
+        os.path.join(os.path.dirname(__file__), "..", "..", "rob521_lab2", "maps", filename)
     )
     
     # Load
@@ -44,7 +45,7 @@ def load_map(filename):
 def load_map_yaml(filename):
     # Get the filepath
     full_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "lab2", "maps", filename)
+        os.path.join(os.path.dirname(__file__), "..", "..", "rob521_lab2", "maps", filename)
     )
     
     # Load
@@ -139,7 +140,7 @@ class PathPlanner:
         # Pygame window for visualization
         self.window = pygame_utils.PygameWindow(
             "Path Planner",
-            (self.map_shape[1] * 8, self.map_shape[0] * 8),
+            (160 * 5, 50 * 5),
             map_filename,
             self.occupancy_map.shape,
             self.map_settings_dict,
@@ -629,10 +630,9 @@ class PathPlanner:
         ):
             # Draw pygame
             for event in pygame.event.get():
-                pass
-                # if event.type == pygame.QUIT:
-                #     pygame.quit()
-                #     return self.nodes  # exit planning safely
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    return self.nodes  # exit planning safely
             
             # Debug message
             if (i % 500 == 0) and i>0:
@@ -708,8 +708,8 @@ class PathPlanner:
                 
                 # Check if we are at the goal
                 dist_to_goal = vdist(final_pose[:2], self.goal_point)
-                if dist_to_goal < tol:
-                    break
+                # if dist_to_goal < tol:
+                    # break
         self.window.save("success.png")
         return self.nodes
 

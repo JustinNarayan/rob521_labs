@@ -21,12 +21,12 @@ import utils
 MYHAL = False
 
 # Goal Tolerances
-TRANS_GOAL_TOL = 0.15  # m, tolerance to consider a goal complete
-ROT_GOAL_TOL = 0.4  # rad, tolerance to consider a goal complete
+TRANS_GOAL_TOL = 0.3  # m, tolerance to consider a goal complete
+ROT_GOAL_TOL = 0.2  # rad, tolerance to consider a goal complete
 
 # Options for Velocities
-TRANS_VEL_OPTS = [0, 0.05, 0.1, 0.25]  # m/s, max of real robot is .26
-ROT_VEL_OPTS = np.linspace(-1.1, 1.1, 9)  # rad/s, max of real robot is 1.82
+TRANS_VEL_OPTS = [0, 0.05,  0.05, 0.1]  # m/s, max of real robot is .26
+ROT_VEL_OPTS = np.linspace(-0.6, 0.6, 15)  # rad/s, max of real robot is 1.82
 
 # Control frequency
 CONTROL_RATE = 5  # Hz, how frequently control signals are sent
@@ -36,12 +36,12 @@ CONTROL_HORIZON = 5  # seconds. if this is set too high and INTEGRATION_DT is to
 INTEGRATION_DT = 0.025  # s, delta t to propagate trajectories forward by
 
 # Collision Checks
-COLLISION_RADIUS = 0.225  # m, radius from base_link to use for collisions, min of 0.2077 based on dimensions of .281 x .306
+COLLISION_RADIUS = 0.25  # m, radius from base_footprint to use for collisions, min of 0.2077 based on dimensions of .281 x .306
 HEURISTIC_RADII = [0.25, 0.275, 0.3, 0.325]
 HEURISTIC_RADII_INFINITE = 0.35 # this radii suggests robot is "infinitely far" from obstacles for purpose of cost. Ideal
 
 # Costs
-COST_LIN_DIST = 10 # per "m" for [0, inf] -> [good, bad]. 0 heuristic means at goal. inf heuristic means very far from goal.
+COST_LIN_DIST = 15 # per "m" for [0, inf] -> [good, bad]. 0 heuristic means at goal. inf heuristic means very far from goal.
 COST_ROT_DIST = 1 # per "rad" for [0, pi] -> [good, bad]. 0 heuristic means aligned with goal. pi heuristic means opposite from goal.
 COST_OBS_DIST = 1 # per "m" for [0, 1] -> [good, bad]. 0 heuristic means > 0.325 m away from obstacles. 0.1 means <= 0.25 m away from obstacles
 
@@ -65,7 +65,7 @@ TEMP_HARDCODE_PATH = [
 
 
 def normalize_angle(angle):
-    return (angle + np.pi) % (2*np.pi) - np.pi # now in [-np.pi, np.pi]
+    return np.arctan2( np.sin(angle), np.cos(angle) ) # now in [-np.pi, np.pi]
 
 def vdist(v1, v2):
     return np.linalg.norm(v1.flatten() - v2.flatten())
@@ -74,8 +74,14 @@ def vdist(v1, v2):
 def load_map(filename):
     import matplotlib.image as mpimg
     import cv2
-
-    im = cv2.imread("../maps/" + filename)
+    
+    # Get the filepath
+    full_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "lab2", "maps", filename)
+    )
+    
+    # Load
+    im = cv2.imread(full_path)
     im = cv2.flip(im, 0)
     # im = mpimg.imread("../maps/" + filename)
     if len(im.shape) > 2:
@@ -111,14 +117,13 @@ class PathFollower:
         )
 
         # map
-        map = rospy.wait_for_message("/map", OccupancyGrid)
         map_filename = "myhal.png"
         occupancy_map = load_map(map_filename)
         self.map_np = occupancy_map
         self.map_resolution = 0.05
         self.map_origin = np.array([0.2, 0.2, -0.0])
         self.map_nonzero_idxes = np.argwhere(self.map_np)
-        
+
         # collisions
         self.collision_radius_pix = COLLISION_RADIUS / self.map_resolution
         self.collision_marker = Marker()
@@ -134,7 +139,7 @@ class PathFollower:
         self.collision_marker.color.a = 0.5
 
         # transforms
-        self.map_baselink_tf = self.tf_buffer.lookup_transform(
+        self.map_baselink_tf = self.tf_buffer.lookup_transform( # "base_footprint" if MYHAL else 
             "map", "base_footprint", rospy.Time(0), rospy.Duration(2.0)
         )
         self.pose_in_map_np = np.zeros(3)
@@ -145,7 +150,7 @@ class PathFollower:
         cur_dir = os.path.dirname(os.path.realpath(__file__))
 
         # to use the temp hardcoded paths above, switch the comment on the following two lines
-        self.path_tuples = np.load(os.path.join(cur_dir, "path_complete.npy")).T
+        self.path_tuples = np.load(os.path.join(cur_dir, "shortest_path_rrt_star.npy")).T
         # self.path_tuples = np.array(TEMP_HARDCODE_PATH)
 
         self.path = utils.se2_pose_list_to_path(self.path_tuples, "map")
@@ -259,14 +264,12 @@ class PathFollower:
                         dists_from_obstacles[o] = radii
                         break
                 # If all checked radii were free, robot is far from obstacles.
-            # Scale dists from obstacles so 0 = "infinitely far"
-            adjusted_dists_from_obstacles = [dist-HEURISTIC_RADII_INFINITE for dist in dists_from_obstacles]
             
             # Calculate costs
             lin_cost = np.array([COST_LIN_DIST * dist for dist in lin_dists_to_goal]).flatten()
             rot_cost = np.array([COST_ROT_DIST * dist for dist in rot_dists_from_goal]).flatten()
-            obs_cost = np.array([COST_OBS_DIST * dist for dist in adjusted_dists_from_obstacles]).flatten()
-            final_cost = (lin_cost + rot_cost + obs_cost).flatten() 
+            obs_cost = np.array([COST_OBS_DIST * dist for dist in dists_from_obstacles]).flatten()
+            final_cost = (lin_cost + rot_cost).flatten()
             
             # Choose best cost
             if final_cost.size == 0:  # hardcoded recovery if all options have collision
@@ -291,7 +294,7 @@ class PathFollower:
 
     def update_pose(self):
         # Update numpy poses with current pose using the tf_buffer
-        self.map_baselink_tf = self.tf_buffer.lookup_transform(
+        self.map_baselink_tf = self.tf_buffer.lookup_transform( # "base_footprint" if MYHAL else 
             "map",  "base_footprint", rospy.Time(0)
         ).transform
         self.pose_in_map_np[:] = [
@@ -456,8 +459,8 @@ class PathFollower:
         # Cell dimensions not checked -- assume valid positions.
         # If this fails due to dimensions, it means cells have been mismapped elsewhere.
         return not self.map_np[ # IS THIS RIGHT?
-            round(cell[1]), # y-coordinate is column, indexed first
-            round(cell[0]) # x-coordinate is row, indexed second
+            int(cell[1]), # y-coordinate is column, indexed first
+            int(cell[0]) # x-coordinate is row, indexed second
         ]
     
     def cells_collision_free(self, cells):

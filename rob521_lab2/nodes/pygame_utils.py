@@ -24,17 +24,14 @@ class PygameWindow:
         pygame.init()
         pygame.display.set_caption(name)
 
-        self.size = size
-        self.meters_per_pixel = (
-            map_settings_dict["resolution"] / self.size[0] * real_map_size_pixels[0]
-        )
+        self.size = np.array(size).T
+        self.meters_per_pixel = map_settings_dict["resolution"]
         self.map_settings_dict = map_settings_dict
         self.origin = np.array(map_settings_dict["origin"])
-
         
         # Get the filepath
         full_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "lab2", "maps", map_png)
+            os.path.join(os.path.dirname(__file__), "..", "..", "rob521_lab2", "maps", map_png)
         )
         map_img = pygame.image.load(full_path)
         map_img = pygame.transform.scale(map_img, self.size)
@@ -49,14 +46,13 @@ class PygameWindow:
             np.array([-self.origin[0], full_map_height + self.origin[1]])
             / self.meters_per_pixel
         )
-
         self.add_se2_pose([0, 0, 0], length=5, color=COLORS["r"])
         self.add_point(
             goal_point.flatten(),
             radius=stopping_dist / self.meters_per_pixel,
             color=COLORS["g"],
         )
-
+        
     def add_point(self, map_frame_point, radius=1, width=0, color=COLORS["k"]):
         map_frame_point[1] = -map_frame_point[1]  # for top left origin
         point_vec = self.point_to_vec(
@@ -87,7 +83,7 @@ class PygameWindow:
         c_vec = self.point_to_vec(p_center)
         p1_vec = self.point_to_vec(p_1)
         p2_vec = self.point_to_vec(p_2)
-
+        print(p_center)
         pygame.draw.polygon(self.screen, color, [c_vec, p1_vec, p2_vec], width=width)
         pygame.display.update()
 

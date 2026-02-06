@@ -34,7 +34,7 @@ class PygameWindow:
         
         # Get the filepath
         full_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "rob521_lab2", "maps", map_png)
+            os.path.join(os.path.dirname(__file__), "..", "..", "lab2", "maps", map_png)
         )
         map_img = pygame.image.load(full_path)
         map_img = pygame.transform.scale(map_img, self.size)

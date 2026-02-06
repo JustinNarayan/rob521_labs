@@ -22,7 +22,7 @@ TRANS_GOAL_TOL = 0.15  # m, tolerance to consider a goal complete
 ROT_GOAL_TOL = 0.4  # rad, tolerance to consider a goal complete
 
 # Options for Velocities
-TRANS_VEL_OPTS = [0, 0.05, 0.1, 0.25]  # m/s, max of real robot is .26
+TRANS_VEL_OPTS = [0, 0.05, 0.1, 0.2]  # m/s, max of real robot is .26
 ROT_VEL_OPTS = np.linspace(-1.1, 1.1, 9)  # rad/s, max of real robot is 1.82
 
 # Control frequency

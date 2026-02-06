@@ -6,6 +6,7 @@ import numpy as np
 from scipy.linalg import block_diag
 from scipy.spatial.distance import cityblock
 import rospy
+from skimage.draw import disk
 import tf2_ros
 
 # msgs
@@ -16,24 +17,38 @@ from visualization_msgs.msg import Marker
 # ros and se2 conversion utils
 import utils
 
+# Goal Tolerances
+TRANS_GOAL_TOL = 0.15  # m, tolerance to consider a goal complete
+ROT_GOAL_TOL = 0.4  # rad, tolerance to consider a goal complete
 
-TRANS_GOAL_TOL = .1  # m, tolerance to consider a goal complete
-ROT_GOAL_TOL = .3  # rad, tolerance to consider a goal complete
-TRANS_VEL_OPTS = [0, 0.025, 0.13, 0.26]  # m/s, max of real robot is .26
-ROT_VEL_OPTS = np.linspace(-1.82, 1.82, 11)  # rad/s, max of real robot is 1.82
+# Options for Velocities
+TRANS_VEL_OPTS = [0, 0.05, 0.1, 0.25]  # m/s, max of real robot is .26
+ROT_VEL_OPTS = np.linspace(-1.1, 1.1, 9)  # rad/s, max of real robot is 1.82
+
+# Control frequency
 CONTROL_RATE = 5  # Hz, how frequently control signals are sent
+
+# Time horizon simulation
 CONTROL_HORIZON = 5  # seconds. if this is set too high and INTEGRATION_DT is too low, code will take a long time to run!
-INTEGRATION_DT = .025  # s, delta t to propagate trajectories forward by
+INTEGRATION_DT = 0.025  # s, delta t to propagate trajectories forward by
+
+# Collision Checks
 COLLISION_RADIUS = 0.225  # m, radius from base_link to use for collisions, min of 0.2077 based on dimensions of .281 x .306
-ROT_DIST_MULT = .1  # multiplier to change effect of rotational distance in choosing correct control
-OBS_DIST_MULT = .1  # multiplier to change the effect of low distance to obstacles on a path
-MIN_TRANS_DIST_TO_USE_ROT = TRANS_GOAL_TOL  # m, robot has to be within this distance to use rot distance in cost
-PATH_NAME = 'path.npy'  # saved path from l2_planning.py, should be in the same directory as this file
+HEURISTIC_RADII = [0.25, 0.275, 0.3, 0.325]
+HEURISTIC_RADII_INFINITE = 0.35 # this radii suggests robot is "infinitely far" from obstacles for purpose of cost. Ideal
 
-# here are some hardcoded paths to use if you want to develop l2_planning and this file in parallel
-# TEMP_HARDCODE_PATH = [[2, 0, 0], [2.75, -1, -np.pi/2], [2.75, -4, -np.pi/2], [2, -4.4, np.pi]]  # almost collision-free
-TEMP_HARDCODE_PATH = [[2, -.5, 0], [2.4, -1, -np.pi/2], [2.45, -3.5, -np.pi/2], [1.5, -4.4, np.pi]]  # some possible collisions
+# Costs
+COST_LIN_DIST = 10 # per "m" for [0, inf] -> [good, bad]. 0 heuristic means at goal. inf heuristic means very far from goal.
+COST_ROT_DIST = 1 # per "rad" for [0, pi] -> [good, bad]. 0 heuristic means aligned with goal. pi heuristic means opposite from goal.
+COST_OBS_DIST = 1 # per "m" for [0, 1] -> [good, bad]. 0 heuristic means > 0.325 m away from obstacles. 0.1 means <= 0.25 m away from obstacles
 
+
+
+def normalize_angle(angle):
+    return (angle + np.pi) % (2*np.pi) - np.pi # now in [-np.pi, np.pi]
+
+def vdist(v1, v2):
+    return np.linalg.norm(v1.flatten() - v2.flatten())
 
 #Map Handling Functions
 def load_map(filename):
@@ -106,8 +121,7 @@ class PathFollower():
         cur_dir = os.path.dirname(os.path.realpath(__file__))
 
         # to use the temp hardcoded paths above, switch the comment on the following two lines
-        # self.path_tuples = np.load(os.path.join(cur_dir, 'path.npy')).T
-        self.path_tuples = np.array(TEMP_HARDCODE_PATH)
+        self.path_tuples = np.load(os.path.join(cur_dir, 'shortest_path_rrt.npy')).T
 
         self.path = utils.se2_pose_list_to_path(self.path_tuples, 'map')
         self.global_path_pub.publish(self.path)
@@ -134,53 +148,114 @@ class PathFollower():
         rospy.on_shutdown(self.stop_robot_on_shutdown)
         self.follow_path()
 
-    def follow_path(self):
+    def follow_path(self):        
         while not rospy.is_shutdown():
             # timing for debugging...loop time should be less than 1/CONTROL_RATE
             tic = rospy.Time.now()
-
             self.update_pose()
             self.check_and_update_goal()
 
             # start trajectory rollout algorithm
             local_paths = np.zeros([self.horizon_timesteps + 1, self.num_opts, 3])
-            local_paths[0] = np.atleast_2d(self.pose_in_map_np).repeat(self.num_opts, axis=0)
+            local_paths[0] = np.atleast_2d(self.pose_in_map_np).repeat(
+                self.num_opts, axis=0
+            )
 
-            print("TO DO: Propogate the trajectory forward, storing the resulting points in local_paths!")
+            ### SIMULATE TRAJECTORY
+            ### Propogate trajectory, assuming perfect control of velocity and no dynamic effects
+            # Extract current position
+            _x, _y, _theta = self.pose_in_map_np
+            # Iterate through all timesteps
             for t in range(1, self.horizon_timesteps + 1):
-                # propogate trajectory forward, assuming perfect control of velocity and no dynamic effects
+                # Iterate through all control options
+                for o in range(1, self.num_opts):
+                    opt = self.all_opts_scaled[o, :].flatten()
+                    # Extract v, w
+                    v, w = opt
+                    # Extract previous x, y, theta
+                    x, y, theta = None, None, None
+                    if t == 1:
+                        x, y, theta = _x, _y, _theta
+                    else:
+                        x, y, theta = local_paths[t-1, o, :].flatten()
+                    # Step x, y, theta
+                    if w == 0:
+                        x += v*np.cos(theta)
+                        y += v*np.sin(theta)
+                    else:
+                        x += (v/w) * ( np.sin(theta + w) - np.sin(theta))
+                        y += (v/w) * (-np.cos(theta + w) + np.cos(theta))
+                    theta += w
+                    # Put into path
+                    local_paths[t, o, :] = np.array([x,y,theta]).reshape(3,)
                 pass
 
-            # check all trajectory points for collisions
-            # first find the closest collision point in the map to each local path point
-            local_paths_pixels = (self.map_origin[:2] + local_paths[:, :, :2]) / self.map_resolution
-            valid_opts = range(self.num_opts)
+            # Check all trajectory points for collisions
+            # First find the closest collision point in the map to each local path point
+            local_paths_pixels = (
+                self.map_origin[:2] + local_paths[:, :, :2]
+            ) / self.map_resolution
             local_paths_lowest_collision_dist = np.ones(self.num_opts) * 50
 
-            print("TO DO: Check the points in local_path_pixels for collisions")
-            for opt in range(local_paths_pixels.shape[1]):
-                for timestep in range(local_paths_pixels.shape[0]):
-                    pass
+            ### Check paths for collisions
+            cells = []
+            for o in range(self.num_opts):
+                cells.append(local_paths_pixels[:, o, :2].T)
+            collisions, sets_colliding = self.cells_collision_free(cells)
 
-            # remove trajectories that were deemed to have collisions
-            print("TO DO: Remove trajectories with collisions!")
-
-            # calculate final cost and choose best option
-            print("TO DO: Calculate the final cost and choose the best control option!")
-            final_cost = np.zeros(self.num_opts)
+            # Remove colliding trajectories
+            valid_opts = np.delete(self.all_opts, sets_colliding, axis=0)
+            paths = np.delete(local_paths, sets_colliding, axis=1)
+            paths_pixels = np.delete(local_paths_pixels, sets_colliding, axis=1)
+            
+            ## Calculate heuristics of trajectories
+            # Linear and rotational distance from goal
+            final_poses = paths[-1, :, :]
+            lin_dists_to_goal, rot_dists_from_goal = [], []
+            for o in range(final_poses.shape[0]):
+                lin_dists_to_goal.append(vdist(final_poses[o, :2], self.cur_goal[:2]))
+                rot_dists_from_goal.append(np.abs(normalize_angle(final_poses[o,2] - self.cur_goal[2])))
+            # Closeness to object
+            dists_from_obstacles = [HEURISTIC_RADII_INFINITE for o in valid_opts]
+            for o in range(len(valid_opts)):
+                point = paths_pixels[-1, o, :2]
+                # Check increasing radii of robot at end of trajectory to assess closeness to obstacles
+                for radii in HEURISTIC_RADII:
+                    cells = self.points_to_robot_circle(np.array([point]).T)
+                    _, sets_colliding = self.cells_collision_free(cells)
+                    
+                    # If collided, store this radii
+                    if len(sets_colliding) > 0:
+                        dists_from_obstacles[o] = radii
+                        break
+                # If all checked radii were free, robot is far from obstacles.
+            # Scale dists from obstacles so 0 = "infinitely far"
+            adjusted_dists_from_obstacles = [dist-HEURISTIC_RADII_INFINITE for dist in dists_from_obstacles]
+            
+            # Calculate costs
+            lin_cost = np.array([COST_LIN_DIST * dist for dist in lin_dists_to_goal]).flatten()
+            rot_cost = np.array([COST_ROT_DIST * dist for dist in rot_dists_from_goal]).flatten()
+            obs_cost = np.array([COST_OBS_DIST * dist for dist in adjusted_dists_from_obstacles]).flatten()
+            final_cost = (lin_cost + rot_cost + obs_cost).flatten() 
+            
+            # Choose best cost
             if final_cost.size == 0:  # hardcoded recovery if all options have collision
-                control = [-.1, 0]
+                control = [-0.1, 0] # go back
             else:
-                best_opt = valid_opts[final_cost.argmin()]
-                control = self.all_opts[best_opt]
-                self.local_path_pub.publish(utils.se2_pose_list_to_path(local_paths[:, best_opt], 'map'))
+                best_opt = final_cost.argmin()
+                control = valid_opts[best_opt]
+                
+                # Publish pose list as path
+                self.local_path_pub.publish(
+                    utils.se2_pose_list_to_path(paths[:, best_opt], "map")
+                )
 
-            # send command to robot
+            # Send command
             self.cmd_pub.publish(utils.unicyle_vel_to_twist(control))
 
             # uncomment out for debugging if necessary
-            # print("Selected control: {control}, Loop time: {time}, Max time: {max_time}".format(
-            #     control=control, time=(rospy.Time.now() - tic).to_sec(), max_time=1/CONTROL_RATE))
+            print("Selected control: {control}, Loop time: {time}, Max time: {max_time}".format(
+                control=control, time=(rospy.Time.now() - tic).to_sec(), max_time=1/CONTROL_RATE))
 
             self.rate.sleep()
 
@@ -196,30 +271,187 @@ class PathFollower():
 
     def check_and_update_goal(self):
         # iterate the goal if necessary
-        dist_from_goal = np.linalg.norm(self.pose_in_map_np[:2] - self.cur_goal[:2])
-        abs_angle_diff = np.abs(self.pose_in_map_np[2] - self.cur_goal[2])
-        rot_dist_from_goal = min(np.pi * 2 - abs_angle_diff, abs_angle_diff)
+        dist_from_goal = vdist(self.pose_in_map_np[:2], self.cur_goal[:2])
+        rot_dist_from_goal = np.abs(normalize_angle(self.pose_in_map_np[2] - self.cur_goal[2]))
+        
+        # abs_angle_diff = np.abs(self.pose_in_map_np[2] - self.cur_goal[2]) # old implementation
+        # rot_dist_from_goal = min(np.pi * 2 - abs_angle_diff, abs_angle_diff)
         if dist_from_goal < TRANS_GOAL_TOL and rot_dist_from_goal < ROT_GOAL_TOL:
-            rospy.loginfo("Goal {goal} at {pose} complete.".format(
-                    goal=self.cur_path_index, pose=self.cur_goal))
+            rospy.loginfo(
+                "Goal {goal} at {pose} complete.".format(
+                    goal=self.cur_path_index, pose=self.cur_goal
+                )
+            )
             if self.cur_path_index == len(self.path_tuples) - 1:
-                rospy.loginfo("Full path complete in {time}s! Path Follower node shutting down.".format(
-                    time=(rospy.Time.now() - self.path_follow_start_time).to_sec()))
-                rospy.signal_shutdown("Full path complete! Path Follower node shutting down.")
+                rospy.loginfo(
+                    "Full path complete in {time}s! Path Follower node shutting down.".format(
+                        time=(rospy.Time.now() - self.path_follow_start_time).to_sec()
+                    )
+                )
+                rospy.signal_shutdown(
+                    "Full path complete! Path Follower node shutting down."
+                )
             else:
                 self.cur_path_index += 1
                 self.cur_goal = np.array(self.path_tuples[self.cur_path_index])
         else:
-            rospy.logdebug("Goal {goal} at {pose}, trans error: {t_err}, rot error: {r_err}.".format(
-                goal=self.cur_path_index, pose=self.cur_goal, t_err=dist_from_goal, r_err=rot_dist_from_goal
-            ))
+            rospy.logdebug(
+                "Goal {goal} at {pose}, trans error: {t_err}, rot error: {r_err}.".format(
+                    goal=self.cur_path_index,
+                    pose=self.cur_goal,
+                    t_err=dist_from_goal,
+                    r_err=rot_dist_from_goal,
+                )
+            )
 
     def stop_robot_on_shutdown(self):
         self.cmd_pub.publish(Twist())
         rospy.loginfo("Published zero vel on shutdown.")
 
+    '''
+    
+    FUNCTIONS COPIED FROM l2_planning.py
+    
+    Why on Earth would the teaching team not create these files in any remotely logical way so we could easily just import PathPlanner? All of the initialization code in this file and l2_planning.py with map files are completely contradictory. This file layout is truly absurd and moronic. Do better. If they can't be bothered to care, why should students?
+    
+    '''
+    
+    def point_to_cell(self, points):
+        # points: a series of (2xN) points of interest from the map reference
+        #       | [x1, x2, ..., xN]
+        # i.e.  | [y1, y2, ..., yN]
+        #
+        # Convert each (x,y) pair to the indices in occupancy map
+        # The map's "reference" frame is the bottom left-hand corner of the map
+        # The occupancy map's reference frame is the true origin
+        #
+        # Output: cells
+        #      | [xmap1, xmap2, ..., xmapN]
+        # i.e. | [ymap1, ymap2, ..., ymapN]
+        
+        # Output
+        cells = np.zeros_like(points)
+        
+        # Extract map properties
+        res_m_per_px = self.map_resolution
+        w_px, h_px = self.map_np.shape
+        w_m, h_m = w_px * res_m_per_px, h_px * res_m_per_px
+        
+        # "Origin" property is offset of map reference frame from the true origin
+        # Provided r_PF (point from frame), get r_PO (point from origin)
+        # r_PO = r_PF - r_FO (frame from origin)
+        frame_from_origin = np.array(self.map_origin[:2]).reshape(2,1)
+        
+        # Points are given in meters
+        num_points = points.shape[1]
+        for i in range(num_points):
+            # Extract r_PF
+            pt_from_frame = points[:, i].reshape(2,1)
+            
+            # Get r_PO
+            pt = pt_from_frame - frame_from_origin
+            
+            # Flip y-axis w.r.t. map height to match occupancy map
+            # Occupancy map counts left and down
+            # Robot coordinates count left and up
+            pt[1] = h_m - pt[1]
+            
+            # Convert meters to pixels
+            pt_occ_map = (pt / res_m_per_px).astype(int) # pixels must be in an integer grid
+            
+            # Input into grid
+            cells[:, i] = pt_occ_map.squeeze()
+        
+        # Output cells (pixels) from meters
+        return cells
 
-if __name__ == '__main__':
+    def points_to_robot_circle(self, points, radius=COLLISION_RADIUS):
+        # points: a series of (2xN) points of interest from the map reference to calculate disks for
+        #       | [x1, x2, ..., xN] |
+        # i.e.  | [y1, y2, ..., yN] |
+        #
+        # Get the cells corresponding to each (x,y) pair.
+        # For each cell, construct a set of cells corresponding to the robot's area.
+        # Each (x,y) pair generates an array listing each cell the robot enchroaches on.
+        #
+        # Output: list with a set of occupied cells for each (x,y) pair
+        # | --------------------- |
+        # | | [x1_1, x1_2, ...] | |
+        # | | [y1_1, y1_2, ...] | |
+        # | --------------------- |
+        # | | [x2_1, x2_2, ...] | |
+        # | | [y2_1, y2_2, ...] | |
+        # | --------------------- |
+        # |          ...          |
+        
+        # Output
+        occ_cells = []
+        
+        # Extract map and robot properties
+        res_m_per_px = self.map_resolution
+        radius_px = radius / res_m_per_px
+        
+        # Get cells from points
+        cells = self.point_to_cell(points)
+        
+        # Get occupied cells from each center cell
+        num_cells = cells.shape[1]
+        for i in range(num_cells):
+            # Get robot center
+            [x], [y] = cells[:, i].reshape(2, 1)
+            
+            # Get all occupied cells
+            ymax, xmax = self.map_np.shape
+            xs, ys = disk( (x, y), radius_px, shape=(xmax, ymax))
+            
+            # Add to output
+            if len(xs) == 0:
+                continue
+            occ_cells.append(np.vstack([ xs, ys ]))
+        
+        # Return occupied cells
+        return occ_cells
+    
+    def cell_collision_free(self, cell):
+        # If the (x,y) coordinate in the map is white: it's free.
+        # If it's black: it's a wall
+        # Cell dimensions not checked -- assume valid positions.
+        # If this fails due to dimensions, it means cells have been mismapped elsewhere.
+        return not self.map_np[ # IS THIS RIGHT?
+            round(cell[1]), # y-coordinate is column, indexed first
+            round(cell[0]) # x-coordinate is row, indexed second
+        ]
+    
+    def cells_collision_free(self, cells):
+        # Check if a set of sets of cells is collision free
+        # Each outer set is a "starting point".
+        # Each inner set is the cells occupied if at that "starting point".
+        # Cells is a list of length N or np arrays of shape (2, M)
+        # N is the number of sets of cells.
+        # M is the number of cells in a sets.
+        num_cells_sets = len(cells)
+        collisions = np.ones(num_cells_sets)
+        sets_colliding = []
+        
+        for i in range(num_cells_sets): # Each set of cells
+            these_cells = cells[i].reshape(2, -1)
+            num_cells = these_cells.shape[1]
+            # Iterate through cells and check if collision free
+            for cell_i in range(num_cells):
+                cell = these_cells[:, cell_i]
+                collision_free = self.cell_collision_free(cell)
+                
+                if not collision_free:
+                    collisions[i] = 0 # collision!
+                    # Add to free sets
+                    sets_colliding.append(i)
+                    continue
+        
+        # For each set (of sets of cells), 0 = Collisions, 1 = No Collision
+        return collisions, sets_colliding
+
+
+if __name__ == "__main__":
     try:
         rospy.init_node('path_follower', log_level=rospy.DEBUG)
         pf = PathFollower()

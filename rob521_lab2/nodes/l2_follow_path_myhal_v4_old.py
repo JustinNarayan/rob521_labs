@@ -18,8 +18,8 @@ from visualization_msgs.msg import Marker
 import utils
 
 # Goal Tolerances
-TRANS_GOAL_TOL = 0.3  # m, tolerance to consider a goal complete
-ROT_GOAL_TOL = 0.5  # rad, tolerance to consider a goal complete
+TRANS_GOAL_TOL = 0.2  # m, tolerance to consider a goal complete
+ROT_GOAL_TOL = 0.2  # rad, tolerance to consider a goal complete
 
 # Options for Velocities
 TRANS_VEL_OPTS = [0, 0.025, 0.05, 0.15]  # m/s, max of real robot is .26
@@ -39,7 +39,7 @@ HEURISTIC_RADII_INFINITE = 0.35 # this radii suggests robot is "infinitely far" 
 
 # Costs
 COST_LIN_DIST = 2 # per "m" for [0, inf] -> [good, bad]. 0 heuristic means at goal. inf heuristic means very far from goal.
-COST_ROT_DIST = 1 # per "rad" for [0, pi] -> [good, bad]. 0 heuristic means aligned with goal. pi heuristic means opposite from goal.
+COST_ROT_DIST = 4 # per "rad" for [0, pi] -> [good, bad]. 0 heuristic means aligned with goal. pi heuristic means opposite from goal.
 COST_OBS_DIST = 0 # per "m" for [0, 1] -> [good, bad]. 0 heuristic means > 0.325 m away from obstacles. 0.1 means <= 0.25 m away from obstacles
 
 
@@ -333,14 +333,18 @@ class PathFollower():
         cells = np.zeros_like(points)
         
         # Extract map properties
-        res_m_per_px = self.map_resolution
-        w_px, h_px = self.map_np.shape
+        res_m_per_px = self.map_settings_dict['resolution']
+        w_px, h_px = None, None
+        if MYHAL:
+            h_px, w_px = self.map_shape
+        else:
+            w_px, h_px = self.map_shape
         w_m, h_m = w_px * res_m_per_px, h_px * res_m_per_px
         
         # "Origin" property is offset of map reference frame from the true origin
         # Provided r_PF (point from frame), get r_PO (point from origin)
         # r_PO = r_PF - r_FO (frame from origin)
-        frame_from_origin = np.array(self.map_origin[:2]).reshape(2,1)
+        frame_from_origin = np.array(self.map_settings_dict['origin'][:2]).reshape(2,1)
         
         # Points are given in meters
         num_points = points.shape[1]
@@ -365,7 +369,7 @@ class PathFollower():
         # Output cells (pixels) from meters
         return cells
 
-    def points_to_robot_circle(self, points, radius=COLLISION_RADIUS):
+    def points_to_robot_circle(self, points):
         # points: a series of (2xN) points of interest from the map reference to calculate disks for
         #       | [x1, x2, ..., xN] |
         # i.e.  | [y1, y2, ..., yN] |
@@ -388,12 +392,12 @@ class PathFollower():
         occ_cells = []
         
         # Extract map and robot properties
-        res_m_per_px = self.map_resolution
-        radius_px = radius / res_m_per_px
+        res_m_per_px = self.map_settings_dict['resolution']
+        radius_px = self.robot_radius / res_m_per_px
         
         # Get cells from points
         cells = self.point_to_cell(points)
-        
+    
         # Get occupied cells from each center cell
         num_cells = cells.shape[1]
         for i in range(num_cells):
@@ -401,7 +405,7 @@ class PathFollower():
             [x], [y] = cells[:, i].reshape(2, 1)
             
             # Get all occupied cells
-            ymax, xmax = self.map_np.shape
+            ymax, xmax = self.map_shape
             xs, ys = disk( (x, y), radius_px, shape=(xmax, ymax))
             
             # Add to output
@@ -417,10 +421,41 @@ class PathFollower():
         # If it's black: it's a wall
         # Cell dimensions not checked -- assume valid positions.
         # If this fails due to dimensions, it means cells have been mismapped elsewhere.
-        return not self.map_np[ # IS THIS RIGHT?
-            round(cell[1]), # y-coordinate is column, indexed first
-            round(cell[0]) # x-coordinate is row, indexed second
-        ]
+        # The occupancy map appears extremely finicky for Myhal
+        # Use the hardcoded obstacle locations in meters instead
+        # Locations are in the map-frame (i.e. 0 is the "top")
+        
+        # Map dimensions
+        res = self.map_settings_dict["resolution"]
+        h, w = np.array(self.map_shape) * res
+        o_x, o_y = np.array(self.map_settings_dict["origin"][:2])
+        
+        # Get position in meters in robot frame
+        robot_frame_x = cell[0] * res
+        robot_frame_y = cell[1] * res
+        
+        # Augment to map origin
+        x = robot_frame_x - o_x
+        y = robot_frame_y - o_y
+        
+        # Check if in bounds
+        dP = self.robot_radius / 1.5
+        if ( (x<-dP) or (x>w+dP) or (y<-dP) or (y>h+dP) ):
+            return False # wall
+        
+        # Check if in obstacle
+        for obs in self.map_settings_dict["obstacles"].values():
+            # Extract dimensions
+            obs_x, obs_y, obs_w, obs_h, _ = obs
+            x_l, x_r = obs_x, obs_x + obs_w
+            y_t, y_b = obs_y, obs_y + obs_h
+            
+            # Determine collision
+            if ( (x>x_l) and (x<x_r) ) and ( (y>y_t) and (y<y_b) ):
+                return False
+            
+        # No collision
+        return True
     
     def cells_collision_free(self, cells):
         # Check if a set of sets of cells is collision free
@@ -431,7 +466,6 @@ class PathFollower():
         # M is the number of cells in a sets.
         num_cells_sets = len(cells)
         collisions = np.ones(num_cells_sets)
-        sets_colliding = []
         
         for i in range(num_cells_sets): # Each set of cells
             these_cells = cells[i].reshape(2, -1)
@@ -443,12 +477,10 @@ class PathFollower():
                 
                 if not collision_free:
                     collisions[i] = 0 # collision!
-                    # Add to free sets
-                    sets_colliding.append(i)
                     continue
         
         # For each set (of sets of cells), 0 = Collisions, 1 = No Collision
-        return collisions, sets_colliding
+        return collisions
 
 
 if __name__ == "__main__":

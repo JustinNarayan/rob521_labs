@@ -113,9 +113,9 @@ class PathPlanner:
             ])
 
         # Robot information
-        self.robot_radius = 0.325 if IS_MYHAL else 0.225 # real radius is 0.225 m, higher to force stricter object avoidance
+        self.robot_radius = 0.3 if IS_MYHAL else 0.225 # real radius is 0.225 m, higher to force stricter object avoidance
         self.vel_max = 0.15 if IS_MYHAL else (0.15 if IS_RRT_STAR else 0.15)  # m/s (Feel free to change!)
-        self.rot_vel_max = 0.35 if IS_MYHAL else (1 if IS_RRT_STAR else 1)  # rad/s (Feel free to change!)
+        self.rot_vel_max = (0.4 if IS_RRT_STAR else 0.35) if IS_MYHAL else (1 if IS_RRT_STAR else 1)  # rad/s (Feel free to change!)
         self.min_dTheta_for_just_rotation = (0.8 if IS_MYHAL else (1.5 if IS_RRT_STAR else 1.5))*np.pi
         self.min_dTheta_for_closest = (0.4 if IS_MYHAL else (0.5 if IS_RRT_STAR else 0.5))*np.pi
 
@@ -124,7 +124,7 @@ class PathPlanner:
         self.stopping_dist = stopping_dist  # m
 
         # Trajectory Simulation Parameters
-        self.timestep = 3 if IS_MYHAL else (3.0 if IS_RRT_STAR else 3.0)  # s
+        self.timestep = (3 if IS_RRT_STAR else 3) if IS_MYHAL else (3.0 if IS_RRT_STAR else 3.0)  # s
         self.num_substeps = 20 if IS_MYHAL else (3 if IS_RRT_STAR else 10)
 
         # Planning storage
@@ -922,6 +922,7 @@ class PathPlanner:
                 
             # Check if we are at the goal
             dist_to_goal = vdist(final_pose[:2], self.goal_point)
+            print(final_pose)
             if dist_to_goal < tol:
                 break
             

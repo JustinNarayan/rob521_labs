@@ -19,12 +19,12 @@ import yaml
 import utils
 
 # Choose MYHAL or Not
-IS_MYHAL = False
+IS_MYHAL = True
 
 # Goal Tolerances
 TRANS_GOAL_TOL = 0.5 if IS_MYHAL else 0.3  # m, tolerance to consider a goal complete
 ROT_GOAL_TOL = 0.5 if IS_MYHAL else 0.4  # rad, tolerance to consider a goal complete
-TRANS_GOAL_TOL_LAST = 0.08
+TRANS_GOAL_TOL_LAST = 0.15
 
 # Options for Velocities
 TRANS_VEL_OPTS = [-0.05, 0, 0.05, 0.15] if IS_MYHAL else [-0.05, 0, 0.05, 0.1, 0.25]  # m/s, max of real robot is .26
@@ -34,7 +34,7 @@ ROT_VEL_OPTS = np.linspace(-1, 1, 9) if IS_MYHAL else np.linspace(-1, 1, 9)  # r
 CONTROL_RATE = 4  # Hz, how frequently control signals are sent
 
 # Time horizon simulation
-CONTROL_HORIZON = 10 if IS_MYHAL else 3  # seconds. if this is set too high and INTEGRATION_DT is too low, code will take a long time to run!
+CONTROL_HORIZON =5 if IS_MYHAL else 3  # seconds. if this is set too high and INTEGRATION_DT is too low, code will take a long time to run!
 INTEGRATION_DT = 0.05 if IS_MYHAL else 0.025  # s, delta t to propagate trajectories forward by
 
 # Collision Checks
@@ -60,7 +60,7 @@ def load_map(filename):
     import matplotlib.image as mpimg
     import cv2
 
-    im = cv2.imread("../maps/" + filename)
+    im = cv2.imread("rob521_lab2/maps/" + filename)
     im = cv2.flip(im, 0)
     # im = mpimg.imread("../maps/" + filename)
     if len(im.shape) > 2:
@@ -72,7 +72,7 @@ def load_map(filename):
 def load_map_yaml(filename):
     # Get the filepath
     full_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "lab2", "maps", filename)
+        os.path.join(os.path.dirname(__file__), "..", "..", "rob521_lab2", "maps", filename)
     )
     
     # Load
@@ -148,9 +148,10 @@ class PathFollower():
 
         # to use the temp hardcoded paths above, switch the comment on the following two lines
         if IS_MYHAL:
-            self.path_tuples = np.load(os.path.join(cur_dir, 'shortest_path_rrt_heuristic.npy')).T
+            self.path_tuples = np.load(os.path.join(cur_dir, 'shortest_path_myhal_rrt.npy')).T
         else:
-            self.path_tuples = np.load(os.path.join(cur_dir, 'shortest_path_rrt_star_1.npy')).T
+            self.path_tuples = np.load(os.path.join(cur_dir, 'shortest_path_willow_rrt_star_1.npy')).T
+        
         self.path = utils.se2_pose_list_to_path(self.path_tuples, 'map')
         self.global_path_pub.publish(self.path)
 
@@ -318,19 +319,19 @@ class PathFollower():
         
         num_goals = len(self.path_tuples)
         trans_goal_tol_eff = TRANS_GOAL_TOL
-        if self.cur_path_index >= num_goals-1:
+        if self.cur_path_index > num_goals-1:
             trans_goal_tol_eff = TRANS_GOAL_TOL_LAST
         
         if (
-            (dist_from_goal < TRANS_GOAL_TOL)# and
-            #( (rot_dist_from_goal < ROT_GOAL_TOL)) # ignore rotational goal
+            (dist_from_goal < trans_goal_tol_eff)
+            #and ( (rot_dist_from_goal < ROT_GOAL_TOL)) # ignore rotational goal
         ):
             rospy.loginfo(
                 "Goal {goal} at {pose} complete.".format(
                     goal=self.cur_path_index, pose=self.cur_goal
                 )
             )
-            if self.cur_path_index == len(self.path_tuples) - 1:
+            if self.cur_path_index == len(self.path_tuples):
                 rospy.loginfo(
                     "Full path complete in {time}s! Path Follower node shutting down.".format(
                         time=(rospy.Time.now() - self.path_follow_start_time).to_sec()
@@ -340,8 +341,8 @@ class PathFollower():
                     "Full path complete! Path Follower node shutting down."
                 )
             else:
-                self.cur_path_index += 1
                 self.cur_goal = np.array(self.path_tuples[self.cur_path_index])
+                self.cur_path_index += 1
         else:
             rospy.logdebug(
                 "Goal {goal} at {pose}, trans error: {t_err}, rot error: {r_err}.".format(
@@ -480,10 +481,10 @@ class PathFollower():
             
             # Augment to map origin
             x = robot_frame_x - o_x
-            y = robot_frame_y - o_y
+            y = h - (robot_frame_y - o_y) # on Myhal, this needs to be flipped in the follow path for some reason. I don't know why.
             
             # Check if in bounds
-            dP = self.robot_radius / 1.5
+            dP = 0 # COLLISION_RADIUS
             if ( (x<-dP) or (x>w+dP) or (y<-dP) or (y>h+dP) ):
                 return False # wall
             

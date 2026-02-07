@@ -10,11 +10,9 @@ import time
 import matplotlib.image as mpimg
 from skimage.draw import disk
 from scipy.linalg import block_diag
-
-# needed to make this work on Windows
-# import pygame_utils
 import pygame_utils
 
+### UTILITIES
 def normalize_angle(angle):
     return np.arctan2( np.sin(angle), np.cos(angle) ) # now in [-np.pi, np.pi]
 
@@ -40,7 +38,6 @@ def load_map(filename):
     # im_np = np.logical_not(im_np)
     return im_np
 
-
 def load_map_yaml(filename):
     # Get the filepath
     full_path = os.path.abspath(
@@ -51,7 +48,6 @@ def load_map_yaml(filename):
     with open(full_path, "r") as stream:
         map_settings_dict = yaml.safe_load(stream)
     return map_settings_dict
-
 
 # Node for building a graph
 class Node:
@@ -223,7 +219,14 @@ class PathPlanner:
             node_pose = self.nodes[id].pose
             node_xy = node_pose[:2]
             
-            # Omit nodes that are not straight ahead
+            # Omit nodes that are too far rotationally
+            # Because of how trajectories are calculated, a node
+            # too rotaitonally different will lead to a point turn
+            # with no translation i.e. a duplicate node differing only
+            # by theta.
+            # By tuning "self.min_dTheta_for_closest", this check can be
+            # removed, but it is helpful for not trapping
+            # RRT in corners/walls.
             theta_from_node = heading(node_xy, point)
             if abs(normalize_angle(theta_from_node - node_pose[2])) > self.min_dTheta_for_closest:
                 continue
@@ -581,13 +584,11 @@ class PathPlanner:
         return cost
 
     def update_children(self, node_id):
-        """
-        Recursively update the costs of all descendants of a node.
-        If a node gets a new cheaper parent, its cost decreases.
-        But then ALL of its children must also decrease accordingly,
-        because their cost-to-come depends on this node.
-        This function propagates the cost change downward through the tree.
-        """
+        # Recursively update the costs of all descendants of a node.
+        # If a node gets a new cheaper parent, its cost decreases.
+        # But then ALL of its children must also decrease accordingly,
+        # because their cost-to-come depends on this node.
+        # This function propagates the cost change downward through the tree.
 
         # Get this node
         node = self.nodes[node_id]
@@ -627,15 +628,10 @@ class PathPlanner:
         max_iterations = int(1e8)
         tol = self.stopping_dist # m
         
-        for i in range(
-            max_iterations
-        ):
+        for i in range(max_iterations):
             # Draw pygame
             for event in pygame.event.get():
                 pass
-                # if event.type == pygame.QUIT:
-                #     pygame.quit()
-                #     return self.nodes  # exit planning safely
             
             # Debug message
             if (i % 500 == 0) and i>0:
@@ -717,16 +713,7 @@ class PathPlanner:
         return self.nodes
 
     def rrt_star_planning(self):
-        """
-        True RRT* Planning Algorithm
-
-        Compared to RRT, RRT* adds:
-        --------------------------
-        1. Neighbor search in a shrinking radius ball
-        2. Best-parent selection (minimum cost-to-come)
-        3. Rewiring nearby nodes through the new node
-        4. Updating descendant costs after rewiring
-        """
+        ### Needs to be updated
         
         max_iterations = int(1e8)
         tol = self.stopping_dist # m

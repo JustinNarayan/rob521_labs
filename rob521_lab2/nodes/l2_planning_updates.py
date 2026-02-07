@@ -10,12 +10,12 @@ import time
 import matplotlib.image as mpimg
 from skimage.draw import disk
 from scipy.linalg import block_diag
+
+MYHAL = True
+
+# needed to make this work on Windows
 import pygame_utils
 
-IS_MYHAL = False
-IS_RRT_STAR = False
-
-### UTILITIES
 def normalize_angle(angle):
     return np.arctan2( np.sin(angle), np.cos(angle) ) # now in [-np.pi, np.pi]
 
@@ -30,7 +30,7 @@ def heading(p1, p2):
 def load_map(filename):
     # Get the filepath
     full_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "lab2", "maps", filename)
+        os.path.join(os.path.dirname(__file__), "..", "..", "rob521_lab2", "maps", filename)
     )
     
     # Load
@@ -41,16 +41,18 @@ def load_map(filename):
     # im_np = np.logical_not(im_np)
     return im_np
 
+
 def load_map_yaml(filename):
     # Get the filepath
     full_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "lab2", "maps", filename)
+        os.path.join(os.path.dirname(__file__), "..", "..", "rob521_lab2", "maps", filename)
     )
     
     # Load
     with open(full_path, "r") as stream:
         map_settings_dict = yaml.safe_load(stream)
     return map_settings_dict
+
 
 # Node for building a graph
 class Node:
@@ -100,29 +102,22 @@ class PathPlanner:
             self.map_settings_dict["origin"][1]
             + self.map_shape[0] * self.map_settings_dict["resolution"]
         )
-        self.search_dist_around_node = 2 if IS_MYHAL else 5 # m
-        
-        # For Willow, trim the edges to avoid exiting to the left imemdiately
-        if not IS_MYHAL:
-            self.bounds = np.array([
-                [0, 50],
-                [-47, 13]
-            ])
+        self.search_dist_around_node = 2 # search [-15, 15] around closest node to goal in (x,y)
 
         # Robot information
-        self.robot_radius = 0.225 if IS_MYHAL else 0.4 # real radius is 0.225 m, force stricter object avoidance
-        self.vel_max = 0.15 if IS_MYHAL else 0.5  # m/s (Feel free to change!)
-        self.rot_vel_max = 0.35 if IS_MYHAL else 2  # rad/s (Feel free to change!)
-        self.min_dTheta_for_just_rotation = (0.8 if IS_MYHAL else 0.6)*np.pi
-        self.min_dTheta_for_closest = 0.4*np.pi
+        self.robot_radius = 0.4  # 0.225 m in reality
+        self.vel_max = 0.15  # m/s (Feel free to change!)
+        self.rot_vel_max = 0.35  # rad/s (Feel free to change!)
+        self.min_dTheta_for_just_rotation = 0.8*np.pi
+        self.min_dTheta_for_closest = 0.35*np.pi
 
         # Goal Parameters
         self.goal_point = goal_point  # m
         self.stopping_dist = stopping_dist  # m
 
         # Trajectory Simulation Parameters
-        self.timestep = 3 if IS_MYHAL else 1.0  # s
-        self.num_substeps = 20 if IS_MYHAL else 10
+        self.timestep = 3  # s
+        self.num_substeps = 20
 
         # Planning storage
         self.nodes = {
@@ -142,16 +137,8 @@ class PathPlanner:
         self.epsilon = 2.5
 
         # Pygame window for visualization
-        dims = (800, 250) if IS_MYHAL else (self.map_shape[1] * 0.5, self.map_shape[0] * 0.5)
         self.window = pygame_utils.PygameWindow(
-            "Path Planner",
-            dims,
-            map_filename,
-            self.occupancy_map.shape,
-            self.map_settings_dict,
-            self.goal_point,
-            self.stopping_dist,
-        )
+            "Path Planner", (160*5, 50*5), self.occupancy_map.shape, self.map_settings_dict, self.goal_point, self.stopping_dist)
         return
     
     # Get the next id
@@ -226,14 +213,7 @@ class PathPlanner:
             node_pose = self.nodes[id].pose
             node_xy = node_pose[:2]
             
-            # Omit nodes that are too far rotationally
-            # Because of how trajectories are calculated, a node
-            # too rotaitonally different will lead to a point turn
-            # with no translation i.e. a duplicate node differing only
-            # by theta.
-            # By tuning "self.min_dTheta_for_closest", this check can be
-            # removed, but it is helpful for not trapping
-            # RRT in corners/walls.
+            # Omit nodes that are not straight ahead
             theta_from_node = heading(node_xy, point)
             if abs(normalize_angle(theta_from_node - node_pose[2])) > self.min_dTheta_for_closest:
                 continue
@@ -507,7 +487,7 @@ class PathPlanner:
             return self.occupancy_map[
                 cell[1], # y-coordinate is column, indexed first
                 cell[0] # x-coordinate is row, indexed second
-            ]
+            ] < 255
     
     def cells_collision_free(self, cells):
         # Check if a set of sets of cells is collision free
@@ -632,11 +612,13 @@ class PathPlanner:
         return cost
 
     def update_children(self, node_id):
-        # Recursively update the costs of all descendants of a node.
-        # If a node gets a new cheaper parent, its cost decreases.
-        # But then ALL of its children must also decrease accordingly,
-        # because their cost-to-come depends on this node.
-        # This function propagates the cost change downward through the tree.
+        """
+        Recursively update the costs of all descendants of a node.
+        If a node gets a new cheaper parent, its cost decreases.
+        But then ALL of its children must also decrease accordingly,
+        because their cost-to-come depends on this node.
+        This function propagates the cost change downward through the tree.
+        """
 
         # Get this node
         node = self.nodes[node_id]
@@ -676,10 +658,14 @@ class PathPlanner:
         max_iterations = int(1e8)
         tol = self.stopping_dist # m
         
-        for i in range(max_iterations):
+        for i in range(
+            max_iterations
+        ):
             # Draw pygame
             for event in pygame.event.get():
-                pass
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    return self.nodes  # exit planning safely
             
             # Debug message
             if (i % 500 == 0) and i>0:
@@ -719,7 +705,7 @@ class PathPlanner:
                 continue
             
             # Get cells occupied by trajectory
-            occ_cells = self.points_to_robot_circle(trajectory_o[:2, :]) # omit theta
+            occ_cells = self.points_to_robot_circle(trajectory_o[:2, :]) # omit 
             
             # Check if cells colliding
             cells_collision_free = self.cells_collision_free(occ_cells)
@@ -761,7 +747,16 @@ class PathPlanner:
         return self.nodes
 
     def rrt_star_planning(self):
-        ### Needs to be updated
+        """
+        True RRT* Planning Algorithm
+
+        Compared to RRT, RRT* adds:
+        --------------------------
+        1. Neighbor search in a shrinking radius ball
+        2. Best-parent selection (minimum cost-to-come)
+        3. Rewiring nearby nodes through the new node
+        4. Updating descendant costs after rewiring
+        """
         
         max_iterations = int(1e8)
         tol = self.stopping_dist # m
@@ -769,6 +764,7 @@ class PathPlanner:
         for i in range(
             max_iterations
         ):
+            
             # Draw pygame
             for event in pygame.event.get():
                 pass
@@ -929,32 +925,23 @@ class PathPlanner:
 
 
 def main():
-    map_settings, map_settings_filename, goal_point = None, None, None
-    stopping_dist = 0.5
-    goal_point
-    
-    if IS_MYHAL:
-        map_filename = "myhal.png"
-        map_setings_filename = "myhal.yaml"
-        goal_point = np.array([[7], [0]])  # m
-    else:
-        map_filename = "willowgarageworld_05res.png"
-        map_setings_filename = "willowgarageworld_05res.yaml"
-        goal_point = np.array([[42], [-44]])  # m
-        
-    
-    path_planner = PathPlanner(
-        map_filename, map_settings_filename, goal_point, stopping_dist
-    )
+    # Set map information
+    map_filename = "myhal.png"
+    map_setings_filename = "myhal.yaml"
 
-    if IS_RRT_STAR:
-        nodes = path_planner.rrt_star_planning()
-        node_path_metric = np.hstack(path_planner.recover_path())
-        np.save("shortest_path_rrt_star.npy", node_path_metric)
-    else:
-        nodes = path_planner.rrt_planning()
-        node_path_metric = np.hstack(path_planner.recover_path())
-        np.save("shortest_path_rrt.npy", node_path_metric)
+    # robot information
+    goal_point = np.array([[7], [0]])  # m
+    stopping_dist = 0.2  # m
+
+    # RRT precursor
+    path_planner = PathPlanner(
+        map_filename, map_setings_filename, goal_point, stopping_dist
+    )
+    nodes = path_planner.rrt_planning()
+    node_path_metric = path_planner.recover_path()
+
+    # Leftover test functions
+    np.save("shortest_path_rrt_heuristic.npy", node_path_metric)
 
 
 if __name__ == "__main__":

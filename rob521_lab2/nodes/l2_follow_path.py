@@ -22,19 +22,19 @@ import utils
 IS_MYHAL = False
 
 # Goal Tolerances
-TRANS_GOAL_TOL = 0.5 if IS_MYHAL else 0.15  # m, tolerance to consider a goal complete
+TRANS_GOAL_TOL = 0.5 if IS_MYHAL else 0.3  # m, tolerance to consider a goal complete
 ROT_GOAL_TOL = 0.5 if IS_MYHAL else 0.4  # rad, tolerance to consider a goal complete
 TRANS_GOAL_TOL_LAST = 0.1
 
 # Options for Velocities
-TRANS_VEL_OPTS = [-0.05, 0, 0.05, 0.15] if IS_MYHAL else [0, 0.05, 0.1, 0.25]  # m/s, max of real robot is .26
-ROT_VEL_OPTS = np.linspace(-1, 1, 9) if IS_MYHAL else np.linspace(-1.1, 1.1, 9)  # rad/s, max of real robot is 1.82
+TRANS_VEL_OPTS = [-0.05, 0, 0.05, 0.15] if IS_MYHAL else [-0.05, 0, 0.05, 0.1, 0.25]  # m/s, max of real robot is .26
+ROT_VEL_OPTS = np.linspace(-1, 1, 9) if IS_MYHAL else np.linspace(-1, 1, 9)  # rad/s, max of real robot is 1.82
 
 # Control frequency
-CONTROL_RATE = 5  # Hz, how frequently control signals are sent
+CONTROL_RATE = 4  # Hz, how frequently control signals are sent
 
 # Time horizon simulation
-CONTROL_HORIZON = 10 if IS_MYHAL else 5  # seconds. if this is set too high and INTEGRATION_DT is too low, code will take a long time to run!
+CONTROL_HORIZON = 10 if IS_MYHAL else 3  # seconds. if this is set too high and INTEGRATION_DT is too low, code will take a long time to run!
 INTEGRATION_DT = 0.05 if IS_MYHAL else 0.025  # s, delta t to propagate trajectories forward by
 
 # Collision Checks
@@ -43,9 +43,9 @@ HEURISTIC_RADII = [0.25, 0.275, 0.3, 0.325]
 HEURISTIC_RADII_INFINITE = 0.35 # this radii suggests robot is "infinitely far" from obstacles for purpose of cost. Ideal
 
 # Costs
-COST_LIN_DIST = 20 if IS_MYHAL else 10 # per "m" for [0, inf] -> [good, bad]. 0 heuristic means at goal. inf heuristic means very far from goal.
+COST_LIN_DIST = 20 if IS_MYHAL else 50 # per "m" for [0, inf] -> [good, bad]. 0 heuristic means at goal. inf heuristic means very far from goal.
 COST_ROT_DIST = 1 # per "rad" for [0, pi] -> [good, bad]. 0 heuristic means aligned with goal. pi heuristic means opposite from goal.
-COST_OBS_DIST = 0 if IS_MYHAL else 1 # per "m" for [0, 1] -> [good, bad]. 0 heuristic means > 0.325 m away from obstacles. 0.1 means <= 0.25 m away from obstacles
+COST_OBS_DIST = 0 if IS_MYHAL else 0 # per "m" for [0, 1] -> [good, bad]. 0 heuristic means > 0.325 m away from obstacles. 0.1 means <= 0.25 m away from obstacles
 DIST_TO_CHECK_ROT = 0.3 if IS_MYHAL else 10 # m
 
 
@@ -117,6 +117,7 @@ class PathFollower():
             self.map_origin = -utils.se2_pose_from_pose(
                 map.info.origin
             )  # negative because of weird way origin is stored
+        
         # collisions
         self.collision_radius_pix = COLLISION_RADIUS / self.map_resolution
         self.collision_marker = Marker()
@@ -246,6 +247,7 @@ class PathFollower():
                     rot_dists_from_goal.append(np.abs(normalize_angle(final_poses[o,2] - self.cur_goal[2])))
                 else:
                     rot_dists_from_goal.append(0)
+    
             # Closeness to object
             dists_from_obstacles = [HEURISTIC_RADII_INFINITE for o in valid_opts]
             for o in range(len(valid_opts)):
@@ -314,14 +316,15 @@ class PathFollower():
         dist_from_goal = vdist(self.pose_in_map_np[:2], self.cur_goal[:2])
         rot_dist_from_goal = np.abs(normalize_angle(self.pose_in_map_np[2] - self.cur_goal[2]))
         
-        num_goals = len(self.path_tuples[self.cur_path_index])
-        trans_goal_tol_eff = TRANS_GOAL_TOL
-        if self.cur_path_index >= num_goals-1:
-            trans_goal_tol_eff = TRANS_GOAL_TOL_LAST
+        # num_goals = len(self.path_tuples[self.cur_path_index])
+        # trans_goal_tol_eff = TRANS_GOAL_TOL
+        # if self.cur_path_index >= num_goals-1:
+        #     trans_goal_tol_eff = TRANS_GOAL_TOL_LAST
+        # print(trans)
         
         if (
-            (dist_from_goal < trans_goal_tol_eff) and
-            ( (rot_dist_from_goal < ROT_GOAL_TOL) or IS_MYHAL ) # ignore rotational goal for MYHAL
+            (dist_from_goal < TRANS_GOAL_TOL) and
+            #( (rot_dist_from_goal < ROT_GOAL_TOL)) # ignore rotational goal
         ):
             rospy.loginfo(
                 "Goal {goal} at {pose} complete.".format(
@@ -462,7 +465,7 @@ class PathFollower():
         # If it's black: it's a wall
         # Cell dimensions not checked -- assume valid positions.
         # If this fails due to dimensions, it means cells have been mismapped elsewhere.
-         if MYHAL:
+        if IS_MYHAL:
             # The occupancy map appears extremely finicky for Myhal
             # Use the hardcoded obstacle locations in meters instead
             # Locations are in the map-frame (i.e. 0 is the "top")
@@ -499,9 +502,9 @@ class PathFollower():
             # No collision
             return True
         else:
-            return self.occupancy_map[
-                cell[1], # y-coordinate is column, indexed first
-                cell[0] # x-coordinate is row, indexed second
+            return not self.map_np[
+                int(np.floor(cell[1])), # y-coordinate is column, indexed first
+                int(np.floor(cell[0])) # x-coordinate is row, indexed second
             ]
     
     def cells_collision_free(self, cells):
@@ -527,7 +530,7 @@ class PathFollower():
                     collisions[i] = 0 # collision!
                     # Add to free sets
                     sets_colliding.append(i)
-                    continue
+                    break
         
         # For each set (of sets of cells), 0 = Collisions, 1 = No Collision
         return collisions, sets_colliding

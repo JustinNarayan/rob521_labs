@@ -150,7 +150,7 @@ class PathFollower():
         if IS_MYHAL:
             self.path_tuples = np.load(os.path.join(cur_dir, 'shortest_path_rrt_heuristic.npy')).T
         else:
-            self.path_tuples = np.load(os.path.join(cur_dir, 'shortest_path_rrt_2.npy')).T
+            self.path_tuples = np.load(os.path.join(cur_dir, 'shortest_path_rrt_star_1.npy')).T
         self.path = utils.se2_pose_list_to_path(self.path_tuples, 'map')
         self.global_path_pub.publish(self.path)
 

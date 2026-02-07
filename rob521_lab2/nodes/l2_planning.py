@@ -12,8 +12,8 @@ from skimage.draw import disk
 from scipy.linalg import block_diag
 import pygame_utils
 
-IS_MYHAL = False
-IS_RRT_STAR = False
+IS_MYHAL = True
+IS_RRT_STAR = True
 
 ### UTILITIES
 def normalize_angle(angle):
@@ -78,6 +78,9 @@ class Node:
     
     def set_cost(self, cost):
         self.cost = cost
+        
+    def set_parent(self, parent_id):
+        self.parent_id = parent_id
 
 # Path Planner
 class PathPlanner:
@@ -100,7 +103,7 @@ class PathPlanner:
             self.map_settings_dict["origin"][1]
             + self.map_shape[0] * self.map_settings_dict["resolution"]
         )
-        self.search_dist_around_node = 2 if IS_MYHAL else 7 # m
+        self.search_dist_around_node = 2 if IS_MYHAL else (5 if IS_RRT_STAR else 7) # m
         
         # For Willow, trim the edges to avoid exiting to the left imemdiately
         if not IS_MYHAL:
@@ -111,18 +114,18 @@ class PathPlanner:
 
         # Robot information
         self.robot_radius = 0.325 if IS_MYHAL else 0.225 # real radius is 0.225 m, higher to force stricter object avoidance
-        self.vel_max = 0.15 if IS_MYHAL else 0.15  # m/s (Feel free to change!)
-        self.rot_vel_max = 0.35 if IS_MYHAL else 1  # rad/s (Feel free to change!)
-        self.min_dTheta_for_just_rotation = (0.8 if IS_MYHAL else 1.5)*np.pi
-        self.min_dTheta_for_closest = (0.4 if IS_MYHAL else 0.5)*np.pi
+        self.vel_max = 0.15 if IS_MYHAL else (0.15 if IS_RRT_STAR else 0.15)  # m/s (Feel free to change!)
+        self.rot_vel_max = 0.35 if IS_MYHAL else (1 if IS_RRT_STAR else 1)  # rad/s (Feel free to change!)
+        self.min_dTheta_for_just_rotation = (0.8 if IS_MYHAL else (1.5 if IS_RRT_STAR else 1.5))*np.pi
+        self.min_dTheta_for_closest = (0.4 if IS_MYHAL else (0.5 if IS_RRT_STAR else 0.5))*np.pi
 
         # Goal Parameters
         self.goal_point = goal_point  # m
         self.stopping_dist = stopping_dist  # m
 
         # Trajectory Simulation Parameters
-        self.timestep = 3 if IS_MYHAL else 3.0  # s
-        self.num_substeps = 20 if IS_MYHAL else 10
+        self.timestep = 3 if IS_MYHAL else (3.0 if IS_RRT_STAR else 3.0)  # s
+        self.num_substeps = 20 if IS_MYHAL else (3 if IS_RRT_STAR else 10)
 
         # Planning storage
         self.nodes = {
@@ -169,14 +172,14 @@ class PathPlanner:
         return None
     
     # Add node
-    def add_node(self, pose, parent_id=None, cost_from_parent=0):
+    def add_node(self, pose, parent_id=None, cost=0):
         new_id = self.get_new_id()
         parent_node = self.get_node_by_id(parent_id)
         parent_node.add_child(new_id)
         new_node = Node(
             pose,
             parent_id,
-            parent_node.get_cost() + cost_from_parent
+            cost
         )
         self.nodes[new_id] = new_node
 
@@ -578,7 +581,7 @@ class PathPlanner:
         traj_r.append([x, y, theta])
         
         # Format as 3xN, with x, y, theta as rows
-        traj_r = np.array(traj_r).T
+        traj_r_f = np.array(traj_r).T
         
         # Translation step
         dist = np.hypot(x_f-x, y_f-y)
@@ -599,10 +602,10 @@ class PathPlanner:
         traj_t.append([x_f, y_f, target_heading])
         
         # Format as 3xN, with x, y, theta as rows
-        traj_t = np.array(traj_t).T
+        traj_t_f = np.array(traj_t).T
         
         # Append trajectories
-        return np.hstack([traj_r, traj_t])
+        return np.hstack([traj_r_f, traj_t_f])
 
     def cost_to_come(self, traj):
         # Segment lengths
@@ -734,7 +737,7 @@ class PathPlanner:
                 self.add_node(
                     final_pose, 
                     parent_id, 
-                    cost_from_parent=self.cost_to_come(trajectory_o)
+                    cost=0 # not needed for RRT
                 )
                 
                 # PyGame drawing
@@ -761,15 +764,11 @@ class PathPlanner:
         return self.nodes
 
     def rrt_star_planning(self):
-        ### Needs to be updated
-        
         max_iterations = int(1e8)
         tol = self.stopping_dist # m
         
-        for i in range(
-            max_iterations
-        ):
-            # Draw pygame
+        for i in range(max_iterations):
+            ## Draw pygame
             for event in pygame.event.get():
                 pass
             
@@ -793,7 +792,7 @@ class PathPlanner:
                     [self.goal_point[1] - 0.5, self.goal_point[1] + 0.5]
                 ])
             
-            point = self.sample_map_space(bounds=bounds_to_search.reshape(2,2))
+            point = self.sample_map_space(bounds=bounds_to_search)
 
             # Get the closest nod
             closest_node_id = self.closest_node(point)
@@ -815,23 +814,24 @@ class PathPlanner:
             
             # Check if cells colliding
             cells_collision_free = self.cells_collision_free(occ_cells)
-            if np.any(cells_collision_free == 0):
+            collision = np.any(cells_collision_free == 0)
+            if collision:
                 continue
             
             # Find all nodes within radius
             radius = self.ball_radius()
-            neighbor_ids = []
+            neighbour_ids = []
             for node_id in self.nodes.keys():
                 node_xy = self.nodes[node_id].get_pose()[:2]
                 if vdist(node_xy, final_pose[:2]) <= radius:
-                    neighbor_ids.append(node_id)
+                    neighbour_ids.append(node_id)
                     
             # Find best parent
             best_parent_id = closest_node_id
             best_cost = self.nodes[closest_node_id].get_cost() + self.cost_to_come(trajectory_o)
             
             # Try connecting through each neighbor
-            for node_id in neighbor_ids:
+            for node_id in neighbour_ids:
                 candidate_node = self.nodes[node_id]
                 # Generate trajectory from neighbor -> new node
                 traj_candidate = self.connect_node_to_point(candidate_node, final_pose[:2])
@@ -854,7 +854,7 @@ class PathPlanner:
             self.add_node(
                 final_pose,
                 best_parent_id,
-                cost_from_parent=best_cost - self.nodes[best_parent_id].get_cost()
+                cost=best_cost
             )
             new_node_id = self.next_id_to_assign - 1  # last assigned ID
             
@@ -875,34 +875,50 @@ class PathPlanner:
             
             # Rewiring Step
             new_node = self.nodes[new_node_id]
-            for node_id in neighbor_ids:
-                # Never rewire the parent itself
-                if node_id == best_parent_id:
+            for neighbour_id in neighbour_ids:
+                # Don't rewire parent
+                if neighbour_id == best_parent_id:
                     continue
-                neighbor_node = self.nodes[node_id]
                 
-                # Cost if rewired through new node
-                traj_rewire = self.simulate_trajectory(new_node, neighbor_node.get_pose()[:2])
+                # Don't rewire ancestor
+                if self.is_ancestor(neighbour_id, new_node_id):
+                    continue
+                
+                # Get new trajectory
+                neighbour_node = self.nodes[neighbour_id]
+                traj_rewire = self.connect_node_to_point(new_node, neighbour_node.get_pose()[:2])
+                
+                # Check if free
                 occ_cells = self.points_to_robot_circle(traj_rewire[:2, :])
                 if np.any(self.cells_collision_free(occ_cells) == 0):
                     continue
+                
+                # Get new cost
                 new_cost = new_node.get_cost() + self.cost_to_come(traj_rewire)
                 
-                # If cheaper, rewire neighbor
-                if new_cost < neighbor_node.get_cost():
-                    # Prevent cycles
-                    if self.is_ancestor(node_id, new_node_id):
-                        continue
-                    # Remove neighbor from its old parent’s child list
-                    old_parent_id = neighbor_node.parent_id
-                    self.nodes[old_parent_id].children_ids.remove(node_id)
-                    # Assign new parent
-                    neighbor_node.parent_id = new_node_id
-                    new_node.add_child(node_id)
-                    # Update neighbor cost
-                    neighbor_node.set_cost(new_cost)
-                    # Propagate cost update to its descendants
-                    self.update_children(node_id)
+                # Check if better cost
+                if new_cost < neighbour_node.get_cost():
+                    # Fix parentage
+                    old_parent_id = neighbour_node.get_parent_id()
+                    self.nodes[old_parent_id].children_ids.remove(neighbour_id)
+                    neighbour_node.set_parent(new_node_id)
+                    self.nodes[new_node_id].add_child(neighbour_id)
+                    
+                    # Update cost with rewire
+                    neighbour_node.set_cost(new_cost)
+                    
+                    # Update children
+                    self.update_children(neighbour_id)
+                    
+                    # Draw rewired edge in new color
+                    xp, yp = self.nodes[new_node_id].get_pose()[:2]
+                    xf, yf = self.nodes[neighbour_id].get_pose()[:2]
+                    self.window.add_line(
+                        [xp, yp],
+                        [xf, yf],
+                        width=1,
+                        color=pygame_utils.COLORS['r']
+                    )
                 
             # Check if we are at the goal
             dist_to_goal = vdist(final_pose[:2], self.goal_point)

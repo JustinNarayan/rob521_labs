@@ -14,6 +14,7 @@ class PygameWindow:
     def __init__(self,
                  name,
                  size,
+                 filename,
                  real_map_size_pixels,
                  map_settings_dict,
                  goal_point,
@@ -23,11 +24,11 @@ class PygameWindow:
         pygame.display.set_caption(name)
 
         self.size = size
-        self.meters_per_pixel = map_settings_dict['resolution']# / self.size[0] * real_map_size_pixels[0]
+        self.meters_per_pixel = map_settings_dict['resolution'] / self.size[0] * real_map_size_pixels[0]
         self.map_settings_dict = map_settings_dict
         self.origin = np.array(map_settings_dict['origin'])
 
-        map_img = pygame.image.load('../maps/myhal.png')
+        map_img = pygame.image.load(f'rob521_lab2/maps/{filename}')
         map_img = pygame.transform.scale(map_img, self.size)
 
         self.screen = pygame.display.set_mode(self.size)

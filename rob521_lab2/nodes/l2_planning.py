@@ -30,7 +30,7 @@ def heading(p1, p2):
 def load_map(filename):
     # Get the filepath
     full_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "lab2", "maps", filename)
+        os.path.join(os.path.dirname(__file__), "..", "..", "rob521_lab2", "maps", filename)
     )
     
     # Load
@@ -44,7 +44,7 @@ def load_map(filename):
 def load_map_yaml(filename):
     # Get the filepath
     full_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "lab2", "maps", filename)
+        os.path.join(os.path.dirname(__file__), "..", "..", "rob521_lab2", "maps", filename)
     )
     
     # Load
@@ -82,11 +82,11 @@ class Node:
 # Path Planner
 class PathPlanner:
     # A path planner capable of perfomring RRT and RRT*
-    def __init__(self, map_filename, map_setings_filename, goal_point, stopping_dist):
+    def __init__(self, map_filename, map_settings_filename, goal_point, stopping_dist):
         # Get map information
         self.occupancy_map = load_map(map_filename)
         self.map_shape = self.occupancy_map.shape
-        self.map_settings_dict = load_map_yaml(map_setings_filename)
+        self.map_settings_dict = load_map_yaml(map_settings_filename)
 
         # Get the metric bounds of the map
         self.bounds = np.zeros([2, 2])  # m
@@ -100,7 +100,7 @@ class PathPlanner:
             self.map_settings_dict["origin"][1]
             + self.map_shape[0] * self.map_settings_dict["resolution"]
         )
-        self.search_dist_around_node = 2 if IS_MYHAL else 5 # m
+        self.search_dist_around_node = 2 if IS_MYHAL else 7 # m
         
         # For Willow, trim the edges to avoid exiting to the left imemdiately
         if not IS_MYHAL:
@@ -110,18 +110,18 @@ class PathPlanner:
             ])
 
         # Robot information
-        self.robot_radius = 0.225 if IS_MYHAL else 0.4 # real radius is 0.225 m, force stricter object avoidance
-        self.vel_max = 0.15 if IS_MYHAL else 0.5  # m/s (Feel free to change!)
-        self.rot_vel_max = 0.35 if IS_MYHAL else 2  # rad/s (Feel free to change!)
-        self.min_dTheta_for_just_rotation = (0.8 if IS_MYHAL else 0.6)*np.pi
-        self.min_dTheta_for_closest = 0.4*np.pi
+        self.robot_radius = 0.325 if IS_MYHAL else 0.225 # real radius is 0.225 m, higher to force stricter object avoidance
+        self.vel_max = 0.15 if IS_MYHAL else 0.15  # m/s (Feel free to change!)
+        self.rot_vel_max = 0.35 if IS_MYHAL else 1  # rad/s (Feel free to change!)
+        self.min_dTheta_for_just_rotation = (0.8 if IS_MYHAL else 1.5)*np.pi
+        self.min_dTheta_for_closest = (0.4 if IS_MYHAL else 0.5)*np.pi
 
         # Goal Parameters
         self.goal_point = goal_point  # m
         self.stopping_dist = stopping_dist  # m
 
         # Trajectory Simulation Parameters
-        self.timestep = 3 if IS_MYHAL else 1.0  # s
+        self.timestep = 3 if IS_MYHAL else 3.0  # s
         self.num_substeps = 20 if IS_MYHAL else 10
 
         # Planning storage
@@ -381,7 +381,7 @@ class PathPlanner:
         # Extract map properties
         res_m_per_px = self.map_settings_dict['resolution']
         w_px, h_px = None, None
-        if MYHAL:
+        if IS_MYHAL:
             h_px, w_px = self.map_shape
         else:
             w_px, h_px = self.map_shape
@@ -467,7 +467,7 @@ class PathPlanner:
         # If it's black: it's a wall
         # Cell dimensions not checked -- assume valid positions.
         # If this fails due to dimensions, it means cells have been mismapped elsewhere.
-        if MYHAL:
+        if IS_MYHAL:
             # The occupancy map appears extremely finicky for Myhal
             # Use the hardcoded obstacle locations in meters instead
             # Locations are in the map-frame (i.e. 0 is the "top")
@@ -529,7 +529,7 @@ class PathPlanner:
                 
                 if not collision_free:
                     collisions[i] = 0 # collision!
-                    continue
+                    break
         
         # For each set (of sets of cells), 0 = Collisions, 1 = No Collision
         return collisions
@@ -917,14 +917,14 @@ class PathPlanner:
         
         last_node = self.nodes[last_node_id]
         path = []
-        path.append(np.array(last_node.get_pose()))
+        path.append(np.array(last_node.get_pose()).reshape(3,1))
         parent_id = last_node.get_parent_id()
         while parent_id != -1:
             node = self.nodes[parent_id]
-            path.append(np.array(node.get_pose()))
+            path.append(np.array(node.get_pose()).reshape(3,1))
             parent_id = node.get_parent_id()
         path.reverse()
-        path = np.array(path).T
+        path = np.array(path)
         return path
 
 
@@ -935,11 +935,11 @@ def main():
     
     if IS_MYHAL:
         map_filename = "myhal.png"
-        map_setings_filename = "myhal.yaml"
+        map_settings_filename = "myhal.yaml"
         goal_point = np.array([[7], [0]])  # m
     else:
         map_filename = "willowgarageworld_05res.png"
-        map_setings_filename = "willowgarageworld_05res.yaml"
+        map_settings_filename = "willowgarageworld_05res.yaml"
         goal_point = np.array([[42], [-44]])  # m
         
     

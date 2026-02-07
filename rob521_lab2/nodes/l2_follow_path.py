@@ -24,7 +24,7 @@ IS_MYHAL = False
 # Goal Tolerances
 TRANS_GOAL_TOL = 0.5 if IS_MYHAL else 0.3  # m, tolerance to consider a goal complete
 ROT_GOAL_TOL = 0.5 if IS_MYHAL else 0.4  # rad, tolerance to consider a goal complete
-TRANS_GOAL_TOL_LAST = 0.1
+TRANS_GOAL_TOL_LAST = 0.08
 
 # Options for Velocities
 TRANS_VEL_OPTS = [-0.05, 0, 0.05, 0.15] if IS_MYHAL else [-0.05, 0, 0.05, 0.1, 0.25]  # m/s, max of real robot is .26
@@ -150,7 +150,7 @@ class PathFollower():
         if IS_MYHAL:
             self.path_tuples = np.load(os.path.join(cur_dir, 'shortest_path_rrt_heuristic.npy')).T
         else:
-            self.path_tuples = np.load(os.path.join(cur_dir, 'path_complete.npy')).T
+            self.path_tuples = np.load(os.path.join(cur_dir, 'shortest_path_rrt_2.npy')).T
         self.path = utils.se2_pose_list_to_path(self.path_tuples, 'map')
         self.global_path_pub.publish(self.path)
 
@@ -316,14 +316,13 @@ class PathFollower():
         dist_from_goal = vdist(self.pose_in_map_np[:2], self.cur_goal[:2])
         rot_dist_from_goal = np.abs(normalize_angle(self.pose_in_map_np[2] - self.cur_goal[2]))
         
-        # num_goals = len(self.path_tuples[self.cur_path_index])
-        # trans_goal_tol_eff = TRANS_GOAL_TOL
-        # if self.cur_path_index >= num_goals-1:
-        #     trans_goal_tol_eff = TRANS_GOAL_TOL_LAST
-        # print(trans)
+        num_goals = len(self.path_tuples)
+        trans_goal_tol_eff = TRANS_GOAL_TOL
+        if self.cur_path_index >= num_goals-1:
+            trans_goal_tol_eff = TRANS_GOAL_TOL_LAST
         
         if (
-            (dist_from_goal < TRANS_GOAL_TOL) and
+            (dist_from_goal < TRANS_GOAL_TOL)# and
             #( (rot_dist_from_goal < ROT_GOAL_TOL)) # ignore rotational goal
         ):
             rospy.loginfo(

@@ -13,27 +13,29 @@ import tf2_ros
 from geometry_msgs.msg import TransformStamped, Twist, PoseStamped
 from nav_msgs.msg import Path, Odometry, OccupancyGrid
 from visualization_msgs.msg import Marker
+import yaml
 
 # ros and se2 conversion utils
 import utils
 
 # Choose MYHAL or Not
-MYHAL = False
+IS_MYHAL = True
 
 # Goal Tolerances
-TRANS_GOAL_TOL = 0.15  # m, tolerance to consider a goal complete
-ROT_GOAL_TOL = 0.4  # rad, tolerance to consider a goal complete
+TRANS_GOAL_TOL = 0.5 if IS_MYHAL else 0.3  # m, tolerance to consider a goal complete
+ROT_GOAL_TOL = 0.5 if IS_MYHAL else 0.4  # rad, tolerance to consider a goal complete
+TRANS_GOAL_TOL_LAST = 0.15
 
 # Options for Velocities
-TRANS_VEL_OPTS = [0, 0.05, 0.1, 0.15]  # m/s, max of real robot is .26
-ROT_VEL_OPTS = np.linspace(-1.1, 1.1, 11)  # rad/s, max of real robot is 1.82
+TRANS_VEL_OPTS = [-0.05, 0, 0.05, 0.15] if IS_MYHAL else [-0.05, 0, 0.05, 0.1, 0.25]  # m/s, max of real robot is .26
+ROT_VEL_OPTS = np.linspace(-1, 1, 9) if IS_MYHAL else np.linspace(-1, 1, 9)  # rad/s, max of real robot is 1.82
 
 # Control frequency
-CONTROL_RATE = 5  # Hz, how frequently control signals are sent
+CONTROL_RATE = 4  # Hz, how frequently control signals are sent
 
 # Time horizon simulation
-CONTROL_HORIZON = 5  # seconds. if this is set too high and INTEGRATION_DT is too low, code will take a long time to run!
-INTEGRATION_DT = 0.025  # s, delta t to propagate trajectories forward by
+CONTROL_HORIZON =5 if IS_MYHAL else 3  # seconds. if this is set too high and INTEGRATION_DT is too low, code will take a long time to run!
+INTEGRATION_DT = 0.05 if IS_MYHAL else 0.025  # s, delta t to propagate trajectories forward by
 
 # Collision Checks
 COLLISION_RADIUS = 0.225  # m, radius from base_link to use for collisions, min of 0.2077 based on dimensions of .281 x .306
@@ -41,41 +43,24 @@ HEURISTIC_RADII = [0.25, 0.275, 0.3, 0.325]
 HEURISTIC_RADII_INFINITE = 0.35 # this radii suggests robot is "infinitely far" from obstacles for purpose of cost. Ideal
 
 # Costs
-COST_LIN_DIST = 20 # per "m" for [0, inf] -> [good, bad]. 0 heuristic means at goal. inf heuristic means very far from goal.
+COST_LIN_DIST = 20 if IS_MYHAL else 50 # per "m" for [0, inf] -> [good, bad]. 0 heuristic means at goal. inf heuristic means very far from goal.
 COST_ROT_DIST = 1 # per "rad" for [0, pi] -> [good, bad]. 0 heuristic means aligned with goal. pi heuristic means opposite from goal.
-COST_OBS_DIST = 1 # per "m" for [0, 1] -> [good, bad]. 0 heuristic means > 0.325 m away from obstacles. 0.1 means <= 0.25 m away from obstacles
-
-# Heuristics
-# ROT_DIST_MULT = 0.1  # multiplier to change effect of rotational distance in choosing correct control
-# OBS_DIST_MULT = (0.1)  # multiplier to change the effect of low distance to obstacles on a path
-# MIN_TRANS_DIST_TO_USE_ROT = TRANS_GOAL_TOL  # m, robot has to be within this distance to use rot distance in cost
-
-# Output file name
-PATH_NAME = "path.npy"  # saved path from l2_planning.py, should be in the same directory as this file
-
-# here are some hardcoded paths to use if you want to develop l2_planning and this file in parallel
-# TEMP_HARDCODE_PATH = [[2, 0, 0], [2.75, -1, -np.pi/2], [2.75, -4, -np.pi/2], [2, -4.4, np.pi]]  # almost collision-free
-TEMP_HARDCODE_PATH = [
-    [2, -0.5, 0],
-    [2.4, -1, -np.pi / 2],
-    [2.45, -3.5, -np.pi / 2],
-    [1.5, -4.4, np.pi],
-]  # some possible collisions
-
+COST_OBS_DIST = 0 if IS_MYHAL else 0 # per "m" for [0, 1] -> [good, bad]. 0 heuristic means > 0.325 m away from obstacles. 0.1 means <= 0.25 m away from obstacles
+DIST_TO_CHECK_ROT = 0.3 if IS_MYHAL else 10 # m
 
 
 def normalize_angle(angle):
-    return np.arctan2( np.sin(angle), np.cos(angle) ) # now in [-np.pi, np.pi]
+    return (angle + np.pi) % (2*np.pi) - np.pi # now in [-np.pi, np.pi]
 
 def vdist(v1, v2):
     return np.linalg.norm(v1.flatten() - v2.flatten())
 
-# Map Handling Functions
+#Map Handling Functions
 def load_map(filename):
     import matplotlib.image as mpimg
     import cv2
 
-    im = cv2.imread("../maps/" + filename)
+    im = cv2.imread("rob521_lab2/maps/" + filename)
     im = cv2.flip(im, 0)
     # im = mpimg.imread("../maps/" + filename)
     if len(im.shape) > 2:
@@ -84,7 +69,18 @@ def load_map(filename):
     im_np = np.logical_not(im_np)  # for ros
     return im_np
 
-class PathFollower:
+def load_map_yaml(filename):
+    # Get the filepath
+    full_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "rob521_lab2", "maps", filename)
+    )
+    
+    # Load
+    with open(full_path, "r") as stream:
+        map_settings_dict = yaml.safe_load(stream)
+    return map_settings_dict
+
+class PathFollower():
     def __init__(self):
         # time full path
         self.path_follow_start_time = rospy.Time.now()
@@ -95,45 +91,38 @@ class PathFollower:
         rospy.sleep(1.0)  # time to get buffer running
 
         # constant transforms
-        self.map_odom_tf = self.tf_buffer.lookup_transform(
-            "map", "odom", rospy.Time(0), rospy.Duration(2.0)
-        ).transform
-        # print(self.map_odom_tf)
+        self.map_odom_tf = self.tf_buffer.lookup_transform('map', 'odom', rospy.Time(0), rospy.Duration(2.0)).transform
+        print(self.map_odom_tf)
 
         # subscribers and publishers
-        self.cmd_pub = rospy.Publisher("/cmd_vel", Twist, queue_size=1)
-        self.global_path_pub = rospy.Publisher(
-            "~global_path", Path, queue_size=1, latch=True
-        )
-        self.local_path_pub = rospy.Publisher("~local_path", Path, queue_size=1)
-        self.collision_marker_pub = rospy.Publisher(
-            "~collision_marker", Marker, queue_size=1
-        )
+        self.cmd_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
+        self.global_path_pub = rospy.Publisher('~global_path', Path, queue_size=1, latch=True)
+        self.local_path_pub = rospy.Publisher('~local_path', Path, queue_size=1)
+        self.collision_marker_pub = rospy.Publisher('~collision_marker', Marker, queue_size=1)
 
-        # map
-        # if MYHAL:
-        #     map_filename = "myhal.png"
-        #     occupancy_map = load_map(map_filename)
-        #     self.map_np = occupancy_map
-        #     self.map_resolution = 0.05
-        #     self.map_origin = np.array([0.2, 0.2, -0.0])
-        #     self.map_nonzero_idxes = np.argwhere(self.map_np)
-        # else:
-        map = rospy.wait_for_message("/map", OccupancyGrid)
-        self.map_np = np.array(map.data).reshape(map.info.height, map.info.width)
-        self.map_resolution = round(map.info.resolution, 5)
-        self.map_origin = -utils.se2_pose_from_pose(
-            map.info.origin
-        )  # negative because of weird way origin is stored
-        # print(self.map_origin)
-        self.map_nonzero_idxes = np.argwhere(self.map_np)
-        # print(map)
-
+        # Load Map
+        if IS_MYHAL:
+            map_filename = "myhal.png"
+            occupancy_map = load_map(map_filename)
+            self.map_shape = occupancy_map.shape
+            self.map_settings_dict = load_map_yaml("myhal.yaml")
+            self.map_np = occupancy_map
+            self.map_resolution = 0.05
+            self.map_origin = np.array([ 0.2 , 0.2 ,-0. ])
+            self.map_nonzero_idxes = np.argwhere(self.map_np)
+        else:
+            map = rospy.wait_for_message("/map", OccupancyGrid)
+            self.map_np = np.array(map.data).reshape(map.info.height, map.info.width)
+            self.map_resolution = round(map.info.resolution, 5)
+            self.map_origin = -utils.se2_pose_from_pose(
+                map.info.origin
+            )  # negative because of weird way origin is stored
+        
         # collisions
         self.collision_radius_pix = COLLISION_RADIUS / self.map_resolution
         self.collision_marker = Marker()
-        self.collision_marker.header.frame_id = "/map"
-        self.collision_marker.ns = "/collision_radius"
+        self.collision_marker.header.frame_id = '/map'
+        self.collision_marker.ns = '/collision_radius'
         self.collision_marker.id = 0
         self.collision_marker.type = Marker.CYLINDER
         self.collision_marker.action = Marker.ADD
@@ -144,8 +133,11 @@ class PathFollower:
         self.collision_marker.color.a = 0.5
 
         # transforms
-        self.map_baselink_tf = self.tf_buffer.lookup_transform( # "base_footprint" if MYHAL else 
-            "map", "base_link", rospy.Time(0), rospy.Duration(2.0)
+        self.map_baselink_tf = self.tf_buffer.lookup_transform(
+            'map', 
+            'base_footprint' if IS_MYHAL else 'base_link', 
+            rospy.Time(0), 
+            rospy.Duration(2.0)
         )
         self.pose_in_map_np = np.zeros(3)
         self.pos_in_map_pix = np.zeros(2)
@@ -155,10 +147,12 @@ class PathFollower:
         cur_dir = os.path.dirname(os.path.realpath(__file__))
 
         # to use the temp hardcoded paths above, switch the comment on the following two lines
-        self.path_tuples = np.load(os.path.join(cur_dir, "path_complete.npy")).T
-        # self.path_tuples = np.array(TEMP_HARDCODE_PATH)
-
-        self.path = utils.se2_pose_list_to_path(self.path_tuples, "map")
+        if IS_MYHAL:
+            self.path_tuples = np.load(os.path.join(cur_dir, 'shortest_path_myhal_rrt.npy')).T
+        else:
+            self.path_tuples = np.load(os.path.join(cur_dir, 'shortest_path_willow_rrt_star_1.npy')).T
+        
+        self.path = utils.se2_pose_list_to_path(self.path_tuples, 'map')
         self.global_path_pub.publish(self.path)
 
         # goal
@@ -167,19 +161,14 @@ class PathFollower:
 
         # trajectory rollout tools
         # self.all_opts is a Nx2 array with all N possible combinations of the t and v vels, scaled by integration dt
-        self.all_opts = np.array(np.meshgrid(TRANS_VEL_OPTS, ROT_VEL_OPTS)).T.reshape(
-            -1, 2
-        )
+        self.all_opts = np.array(np.meshgrid(TRANS_VEL_OPTS, ROT_VEL_OPTS)).T.reshape(-1, 2)
 
         # if there is a [0, 0] option, remove it
-        all_zeros_index = (
-            (np.abs(self.all_opts) < [0.001, 0.001]).all(axis=1).nonzero()[0]
-        )
+        all_zeros_index = (np.abs(self.all_opts) < [0.001, 0.001]).all(axis=1).nonzero()[0]
         if all_zeros_index.size > 0:
             self.all_opts = np.delete(self.all_opts, all_zeros_index, axis=0)
         self.all_opts_scaled = self.all_opts * INTEGRATION_DT
 
-        # Collection path options to integrate
         self.num_opts = self.all_opts_scaled.shape[0]
         self.horizon_timesteps = int(np.ceil(CONTROL_HORIZON / INTEGRATION_DT))
 
@@ -250,11 +239,16 @@ class PathFollower:
             
             ## Calculate heuristics of trajectories
             # Linear and rotational distance from goal
+            curr_dist_from_goal = vdist(self.pose_in_map_np[:2], self.cur_goal[:2])
             final_poses = paths[-1, :, :]
             lin_dists_to_goal, rot_dists_from_goal = [], []
             for o in range(final_poses.shape[0]):
                 lin_dists_to_goal.append(vdist(final_poses[o, :2], self.cur_goal[:2]))
-                rot_dists_from_goal.append(np.abs(normalize_angle(final_poses[o,2] - self.cur_goal[2])))
+                if curr_dist_from_goal <= DIST_TO_CHECK_ROT:
+                    rot_dists_from_goal.append(np.abs(normalize_angle(final_poses[o,2] - self.cur_goal[2])))
+                else:
+                    rot_dists_from_goal.append(0)
+    
             # Closeness to object
             dists_from_obstacles = [HEURISTIC_RADII_INFINITE for o in valid_opts]
             for o in range(len(valid_opts)):
@@ -269,12 +263,14 @@ class PathFollower:
                         dists_from_obstacles[o] = radii
                         break
                 # If all checked radii were free, robot is far from obstacles.
+            # Scale dists from obstacles so 0 = "infinitely far"
+            adjusted_dists_from_obstacles = [dist-HEURISTIC_RADII_INFINITE for dist in dists_from_obstacles]
             
             # Calculate costs
             lin_cost = np.array([COST_LIN_DIST * dist for dist in lin_dists_to_goal]).flatten()
             rot_cost = np.array([COST_ROT_DIST * dist for dist in rot_dists_from_goal]).flatten()
-            obs_cost = np.array([COST_OBS_DIST * dist for dist in dists_from_obstacles]).flatten()
-            final_cost = (lin_cost + rot_cost).flatten()
+            obs_cost = np.array([COST_OBS_DIST * dist for dist in adjusted_dists_from_obstacles]).flatten()
+            final_cost = (lin_cost + rot_cost + obs_cost).flatten() 
             
             # Choose best cost
             if final_cost.size == 0:  # hardcoded recovery if all options have collision
@@ -299,8 +295,10 @@ class PathFollower:
 
     def update_pose(self):
         # Update numpy poses with current pose using the tf_buffer
-        self.map_baselink_tf = self.tf_buffer.lookup_transform( # "base_footprint" if MYHAL else 
-            "map",  "base_link", rospy.Time(0)
+        self.map_baselink_tf = self.tf_buffer.lookup_transform(
+            'map', 
+            'base_footprint' if IS_MYHAL else 'base_link', 
+            rospy.Time(0)
         ).transform
         self.pose_in_map_np[:] = [
             self.map_baselink_tf.translation.x,
@@ -319,15 +317,21 @@ class PathFollower:
         dist_from_goal = vdist(self.pose_in_map_np[:2], self.cur_goal[:2])
         rot_dist_from_goal = np.abs(normalize_angle(self.pose_in_map_np[2] - self.cur_goal[2]))
         
-        # abs_angle_diff = np.abs(self.pose_in_map_np[2] - self.cur_goal[2]) # old implementation
-        # rot_dist_from_goal = min(np.pi * 2 - abs_angle_diff, abs_angle_diff)
-        if dist_from_goal < TRANS_GOAL_TOL and rot_dist_from_goal < ROT_GOAL_TOL:
+        num_goals = len(self.path_tuples)
+        trans_goal_tol_eff = TRANS_GOAL_TOL
+        if self.cur_path_index > num_goals-1:
+            trans_goal_tol_eff = TRANS_GOAL_TOL_LAST
+        
+        if (
+            (dist_from_goal < trans_goal_tol_eff)
+            #and ( (rot_dist_from_goal < ROT_GOAL_TOL)) # ignore rotational goal
+        ):
             rospy.loginfo(
                 "Goal {goal} at {pose} complete.".format(
                     goal=self.cur_path_index, pose=self.cur_goal
                 )
             )
-            if self.cur_path_index == len(self.path_tuples) - 1:
+            if self.cur_path_index == len(self.path_tuples):
                 rospy.loginfo(
                     "Full path complete in {time}s! Path Follower node shutting down.".format(
                         time=(rospy.Time.now() - self.path_follow_start_time).to_sec()
@@ -337,8 +341,8 @@ class PathFollower:
                     "Full path complete! Path Follower node shutting down."
                 )
             else:
-                self.cur_path_index += 1
                 self.cur_goal = np.array(self.path_tuples[self.cur_path_index])
+                self.cur_path_index += 1
         else:
             rospy.logdebug(
                 "Goal {goal} at {pose}, trans error: {t_err}, rot error: {r_err}.".format(
@@ -352,8 +356,6 @@ class PathFollower:
     def stop_robot_on_shutdown(self):
         self.cmd_pub.publish(Twist())
         rospy.loginfo("Published zero vel on shutdown.")
-        
-        
     '''
     
     FUNCTIONS COPIED FROM l2_planning.py
@@ -463,10 +465,47 @@ class PathFollower:
         # If it's black: it's a wall
         # Cell dimensions not checked -- assume valid positions.
         # If this fails due to dimensions, it means cells have been mismapped elsewhere.
-        return not self.map_np[ # IS THIS RIGHT?
-            round(cell[1]), # y-coordinate is column, indexed first
-            round(cell[0]) # x-coordinate is row, indexed second
-        ]
+        if IS_MYHAL:
+            # The occupancy map appears extremely finicky for Myhal
+            # Use the hardcoded obstacle locations in meters instead
+            # Locations are in the map-frame (i.e. 0 is the "top")
+            
+            # Map dimensions
+            res = self.map_settings_dict["resolution"]
+            h, w = np.array(self.map_shape) * res
+            o_x, o_y = np.array(self.map_settings_dict["origin"][:2])
+            
+            # Get position in meters in robot frame
+            robot_frame_x = cell[0] * res
+            robot_frame_y = cell[1] * res
+            
+            # Augment to map origin
+            x = robot_frame_x - o_x
+            y = h - (robot_frame_y - o_y) # on Myhal, this needs to be flipped in the follow path for some reason. I don't know why.
+            
+            # Check if in bounds
+            dP = 0 # COLLISION_RADIUS
+            if ( (x<-dP) or (x>w+dP) or (y<-dP) or (y>h+dP) ):
+                return False # wall
+            
+            # Check if in obstacle
+            for obs in self.map_settings_dict["obstacles"].values():
+                # Extract dimensions
+                obs_x, obs_y, obs_w, obs_h, _ = obs
+                x_l, x_r = obs_x, obs_x + obs_w
+                y_t, y_b = obs_y, obs_y + obs_h
+                
+                # Determine collision
+                if ( (x>x_l) and (x<x_r) ) and ( (y>y_t) and (y<y_b) ):
+                    return False
+                
+            # No collision
+            return True
+        else:
+            return not self.map_np[
+                int(np.floor(cell[1])), # y-coordinate is column, indexed first
+                int(np.floor(cell[0])) # x-coordinate is row, indexed second
+            ]
     
     def cells_collision_free(self, cells):
         # Check if a set of sets of cells is collision free
@@ -491,7 +530,7 @@ class PathFollower:
                     collisions[i] = 0 # collision!
                     # Add to free sets
                     sets_colliding.append(i)
-                    continue
+                    break
         
         # For each set (of sets of cells), 0 = Collisions, 1 = No Collision
         return collisions, sets_colliding
@@ -499,7 +538,7 @@ class PathFollower:
 
 if __name__ == "__main__":
     try:
-        rospy.init_node("path_follower", log_level=rospy.DEBUG)
+        rospy.init_node('path_follower', log_level=rospy.DEBUG)
         pf = PathFollower()
     except rospy.ROSInterruptException:
         pass

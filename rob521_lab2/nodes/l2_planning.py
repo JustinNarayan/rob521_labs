@@ -10,12 +10,12 @@ import time
 import matplotlib.image as mpimg
 from skimage.draw import disk
 from scipy.linalg import block_diag
-
-MYHAL = True
-
-# needed to make this work on Windows
 import pygame_utils
 
+IS_MYHAL = True
+IS_RRT_STAR = True
+
+### UTILITIES
 def normalize_angle(angle):
     return np.arctan2( np.sin(angle), np.cos(angle) ) # now in [-np.pi, np.pi]
 
@@ -41,7 +41,6 @@ def load_map(filename):
     # im_np = np.logical_not(im_np)
     return im_np
 
-
 def load_map_yaml(filename):
     # Get the filepath
     full_path = os.path.abspath(
@@ -52,7 +51,6 @@ def load_map_yaml(filename):
     with open(full_path, "r") as stream:
         map_settings_dict = yaml.safe_load(stream)
     return map_settings_dict
-
 
 # Node for building a graph
 class Node:
@@ -80,15 +78,18 @@ class Node:
     
     def set_cost(self, cost):
         self.cost = cost
+        
+    def set_parent(self, parent_id):
+        self.parent_id = parent_id
 
 # Path Planner
 class PathPlanner:
     # A path planner capable of perfomring RRT and RRT*
-    def __init__(self, map_filename, map_setings_filename, goal_point, stopping_dist):
+    def __init__(self, map_filename, map_settings_filename, goal_point, stopping_dist):
         # Get map information
         self.occupancy_map = load_map(map_filename)
         self.map_shape = self.occupancy_map.shape
-        self.map_settings_dict = load_map_yaml(map_setings_filename)
+        self.map_settings_dict = load_map_yaml(map_settings_filename)
 
         # Get the metric bounds of the map
         self.bounds = np.zeros([2, 2])  # m
@@ -102,22 +103,29 @@ class PathPlanner:
             self.map_settings_dict["origin"][1]
             + self.map_shape[0] * self.map_settings_dict["resolution"]
         )
-        self.search_dist_around_node = 2 # search [-15, 15] around closest node to goal in (x,y)
+        self.search_dist_around_node = 2 if IS_MYHAL else (5 if IS_RRT_STAR else 7) # m
+        
+        # For Willow, trim the edges to avoid exiting to the left imemdiately
+        if not IS_MYHAL:
+            self.bounds = np.array([
+                [0, 50],
+                [-47, 13]
+            ])
 
         # Robot information
-        self.robot_radius = 0.4  # 0.225 m in reality
-        self.vel_max = 0.15  # m/s (Feel free to change!)
-        self.rot_vel_max = 0.35  # rad/s (Feel free to change!)
-        self.min_dTheta_for_just_rotation = 0.8*np.pi
-        self.min_dTheta_for_closest = 0.35*np.pi
+        self.robot_radius = 0.3 if IS_MYHAL else 0.225 # real radius is 0.225 m, higher to force stricter object avoidance
+        self.vel_max = 0.15 if IS_MYHAL else (0.15 if IS_RRT_STAR else 0.15)  # m/s (Feel free to change!)
+        self.rot_vel_max = (0.4 if IS_RRT_STAR else 0.35) if IS_MYHAL else (1 if IS_RRT_STAR else 1)  # rad/s (Feel free to change!)
+        self.min_dTheta_for_just_rotation = (0.8 if IS_MYHAL else (1.5 if IS_RRT_STAR else 1.5))*np.pi
+        self.min_dTheta_for_closest = (0.4 if IS_MYHAL else (0.5 if IS_RRT_STAR else 0.5))*np.pi
 
         # Goal Parameters
         self.goal_point = goal_point  # m
         self.stopping_dist = stopping_dist  # m
 
         # Trajectory Simulation Parameters
-        self.timestep = 3  # s
-        self.num_substeps = 20
+        self.timestep = (3 if IS_RRT_STAR else 3) if IS_MYHAL else (3.0 if IS_RRT_STAR else 3.0)  # s
+        self.num_substeps = 20 if IS_MYHAL else (3 if IS_RRT_STAR else 10)
 
         # Planning storage
         self.nodes = {
@@ -137,8 +145,16 @@ class PathPlanner:
         self.epsilon = 2.5
 
         # Pygame window for visualization
+        dims = (800, 250) if IS_MYHAL else (self.map_shape[1] * 0.5, self.map_shape[0] * 0.5)
         self.window = pygame_utils.PygameWindow(
-            "Path Planner", (160*5, 50*5), self.occupancy_map.shape, self.map_settings_dict, self.goal_point, self.stopping_dist)
+            "Path Planner",
+            dims,
+            map_filename,
+            self.occupancy_map.shape,
+            self.map_settings_dict,
+            self.goal_point,
+            self.stopping_dist,
+        )
         return
     
     # Get the next id
@@ -156,14 +172,14 @@ class PathPlanner:
         return None
     
     # Add node
-    def add_node(self, pose, parent_id=None, cost_from_parent=0):
+    def add_node(self, pose, parent_id=None, cost=0):
         new_id = self.get_new_id()
         parent_node = self.get_node_by_id(parent_id)
         parent_node.add_child(new_id)
         new_node = Node(
             pose,
             parent_id,
-            parent_node.get_cost() + cost_from_parent
+            cost
         )
         self.nodes[new_id] = new_node
 
@@ -213,7 +229,14 @@ class PathPlanner:
             node_pose = self.nodes[id].pose
             node_xy = node_pose[:2]
             
-            # Omit nodes that are not straight ahead
+            # Omit nodes that are too far rotationally
+            # Because of how trajectories are calculated, a node
+            # too rotaitonally different will lead to a point turn
+            # with no translation i.e. a duplicate node differing only
+            # by theta.
+            # By tuning "self.min_dTheta_for_closest", this check can be
+            # removed, but it is helpful for not trapping
+            # RRT in corners/walls.
             theta_from_node = heading(node_xy, point)
             if abs(normalize_angle(theta_from_node - node_pose[2])) > self.min_dTheta_for_closest:
                 continue
@@ -361,7 +384,7 @@ class PathPlanner:
         # Extract map properties
         res_m_per_px = self.map_settings_dict['resolution']
         w_px, h_px = None, None
-        if MYHAL:
+        if IS_MYHAL:
             h_px, w_px = self.map_shape
         else:
             w_px, h_px = self.map_shape
@@ -447,7 +470,7 @@ class PathPlanner:
         # If it's black: it's a wall
         # Cell dimensions not checked -- assume valid positions.
         # If this fails due to dimensions, it means cells have been mismapped elsewhere.
-        if MYHAL:
+        if IS_MYHAL:
             # The occupancy map appears extremely finicky for Myhal
             # Use the hardcoded obstacle locations in meters instead
             # Locations are in the map-frame (i.e. 0 is the "top")
@@ -487,7 +510,7 @@ class PathPlanner:
             return self.occupancy_map[
                 cell[1], # y-coordinate is column, indexed first
                 cell[0] # x-coordinate is row, indexed second
-            ] < 255
+            ]
     
     def cells_collision_free(self, cells):
         # Check if a set of sets of cells is collision free
@@ -509,7 +532,7 @@ class PathPlanner:
                 
                 if not collision_free:
                     collisions[i] = 0 # collision!
-                    continue
+                    break
         
         # For each set (of sets of cells), 0 = Collisions, 1 = No Collision
         return collisions
@@ -558,7 +581,7 @@ class PathPlanner:
         traj_r.append([x, y, theta])
         
         # Format as 3xN, with x, y, theta as rows
-        traj_r = np.array(traj_r).T
+        traj_r_f = np.array(traj_r).T
         
         # Translation step
         dist = np.hypot(x_f-x, y_f-y)
@@ -579,10 +602,10 @@ class PathPlanner:
         traj_t.append([x_f, y_f, target_heading])
         
         # Format as 3xN, with x, y, theta as rows
-        traj_t = np.array(traj_t).T
+        traj_t_f = np.array(traj_t).T
         
         # Append trajectories
-        return np.hstack([traj_r, traj_t])
+        return np.hstack([traj_r_f, traj_t_f])
 
     def cost_to_come(self, traj):
         # Segment lengths
@@ -612,13 +635,11 @@ class PathPlanner:
         return cost
 
     def update_children(self, node_id):
-        """
-        Recursively update the costs of all descendants of a node.
-        If a node gets a new cheaper parent, its cost decreases.
-        But then ALL of its children must also decrease accordingly,
-        because their cost-to-come depends on this node.
-        This function propagates the cost change downward through the tree.
-        """
+        # Recursively update the costs of all descendants of a node.
+        # If a node gets a new cheaper parent, its cost decreases.
+        # But then ALL of its children must also decrease accordingly,
+        # because their cost-to-come depends on this node.
+        # This function propagates the cost change downward through the tree.
 
         # Get this node
         node = self.nodes[node_id]
@@ -658,14 +679,10 @@ class PathPlanner:
         max_iterations = int(1e8)
         tol = self.stopping_dist # m
         
-        for i in range(
-            max_iterations
-        ):
+        for i in range(max_iterations):
             # Draw pygame
             for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    pygame.quit()
-                    return self.nodes  # exit planning safely
+                pass
             
             # Debug message
             if (i % 500 == 0) and i>0:
@@ -705,7 +722,7 @@ class PathPlanner:
                 continue
             
             # Get cells occupied by trajectory
-            occ_cells = self.points_to_robot_circle(trajectory_o[:2, :]) # omit 
+            occ_cells = self.points_to_robot_circle(trajectory_o[:2, :]) # omit theta
             
             # Check if cells colliding
             cells_collision_free = self.cells_collision_free(occ_cells)
@@ -720,7 +737,7 @@ class PathPlanner:
                 self.add_node(
                     final_pose, 
                     parent_id, 
-                    cost_from_parent=self.cost_to_come(trajectory_o)
+                    cost=0 # not needed for RRT
                 )
                 
                 # PyGame drawing
@@ -747,25 +764,11 @@ class PathPlanner:
         return self.nodes
 
     def rrt_star_planning(self):
-        """
-        True RRT* Planning Algorithm
-
-        Compared to RRT, RRT* adds:
-        --------------------------
-        1. Neighbor search in a shrinking radius ball
-        2. Best-parent selection (minimum cost-to-come)
-        3. Rewiring nearby nodes through the new node
-        4. Updating descendant costs after rewiring
-        """
-        
         max_iterations = int(1e8)
         tol = self.stopping_dist # m
         
-        for i in range(
-            max_iterations
-        ):
-            
-            # Draw pygame
+        for i in range(max_iterations):
+            ## Draw pygame
             for event in pygame.event.get():
                 pass
             
@@ -789,7 +792,7 @@ class PathPlanner:
                     [self.goal_point[1] - 0.5, self.goal_point[1] + 0.5]
                 ])
             
-            point = self.sample_map_space(bounds=bounds_to_search.reshape(2,2))
+            point = self.sample_map_space(bounds=bounds_to_search)
 
             # Get the closest nod
             closest_node_id = self.closest_node(point)
@@ -811,23 +814,24 @@ class PathPlanner:
             
             # Check if cells colliding
             cells_collision_free = self.cells_collision_free(occ_cells)
-            if np.any(cells_collision_free == 0):
+            collision = np.any(cells_collision_free == 0)
+            if collision:
                 continue
             
             # Find all nodes within radius
             radius = self.ball_radius()
-            neighbor_ids = []
+            neighbour_ids = []
             for node_id in self.nodes.keys():
                 node_xy = self.nodes[node_id].get_pose()[:2]
                 if vdist(node_xy, final_pose[:2]) <= radius:
-                    neighbor_ids.append(node_id)
+                    neighbour_ids.append(node_id)
                     
             # Find best parent
             best_parent_id = closest_node_id
             best_cost = self.nodes[closest_node_id].get_cost() + self.cost_to_come(trajectory_o)
             
             # Try connecting through each neighbor
-            for node_id in neighbor_ids:
+            for node_id in neighbour_ids:
                 candidate_node = self.nodes[node_id]
                 # Generate trajectory from neighbor -> new node
                 traj_candidate = self.connect_node_to_point(candidate_node, final_pose[:2])
@@ -850,7 +854,7 @@ class PathPlanner:
             self.add_node(
                 final_pose,
                 best_parent_id,
-                cost_from_parent=best_cost - self.nodes[best_parent_id].get_cost()
+                cost=best_cost
             )
             new_node_id = self.next_id_to_assign - 1  # last assigned ID
             
@@ -871,37 +875,54 @@ class PathPlanner:
             
             # Rewiring Step
             new_node = self.nodes[new_node_id]
-            for node_id in neighbor_ids:
-                # Never rewire the parent itself
-                if node_id == best_parent_id:
+            for neighbour_id in neighbour_ids:
+                # Don't rewire parent
+                if neighbour_id == best_parent_id:
                     continue
-                neighbor_node = self.nodes[node_id]
                 
-                # Cost if rewired through new node
-                traj_rewire = self.simulate_trajectory(new_node, neighbor_node.get_pose()[:2])
+                # Don't rewire ancestor
+                if self.is_ancestor(neighbour_id, new_node_id):
+                    continue
+                
+                # Get new trajectory
+                neighbour_node = self.nodes[neighbour_id]
+                traj_rewire = self.connect_node_to_point(new_node, neighbour_node.get_pose()[:2])
+                
+                # Check if free
                 occ_cells = self.points_to_robot_circle(traj_rewire[:2, :])
                 if np.any(self.cells_collision_free(occ_cells) == 0):
                     continue
+                
+                # Get new cost
                 new_cost = new_node.get_cost() + self.cost_to_come(traj_rewire)
                 
-                # If cheaper, rewire neighbor
-                if new_cost < neighbor_node.get_cost():
-                    # Prevent cycles
-                    if self.is_ancestor(node_id, new_node_id):
-                        continue
-                    # Remove neighbor from its old parent’s child list
-                    old_parent_id = neighbor_node.parent_id
-                    self.nodes[old_parent_id].children_ids.remove(node_id)
-                    # Assign new parent
-                    neighbor_node.parent_id = new_node_id
-                    new_node.add_child(node_id)
-                    # Update neighbor cost
-                    neighbor_node.set_cost(new_cost)
-                    # Propagate cost update to its descendants
-                    self.update_children(node_id)
+                # Check if better cost
+                if new_cost < neighbour_node.get_cost():
+                    # Fix parentage
+                    old_parent_id = neighbour_node.get_parent_id()
+                    self.nodes[old_parent_id].children_ids.remove(neighbour_id)
+                    neighbour_node.set_parent(new_node_id)
+                    self.nodes[new_node_id].add_child(neighbour_id)
+                    
+                    # Update cost with rewire
+                    neighbour_node.set_cost(new_cost)
+                    
+                    # Update children
+                    self.update_children(neighbour_id)
+                    
+                    # Draw rewired edge in new color
+                    xp, yp = self.nodes[new_node_id].get_pose()[:2]
+                    xf, yf = self.nodes[neighbour_id].get_pose()[:2]
+                    self.window.add_line(
+                        [xp, yp],
+                        [xf, yf],
+                        width=1,
+                        color=pygame_utils.COLORS['r']
+                    )
                 
             # Check if we are at the goal
             dist_to_goal = vdist(final_pose[:2], self.goal_point)
+            print(final_pose)
             if dist_to_goal < tol:
                 break
             
@@ -913,35 +934,44 @@ class PathPlanner:
         
         last_node = self.nodes[last_node_id]
         path = []
-        path.append(np.array(last_node.get_pose()))
+        path.append(np.array(last_node.get_pose()).reshape(3,1))
         parent_id = last_node.get_parent_id()
         while parent_id != -1:
             node = self.nodes[parent_id]
-            path.append(np.array(node.get_pose()))
+            path.append(np.array(node.get_pose()).reshape(3,1))
             parent_id = node.get_parent_id()
         path.reverse()
-        path = np.array(path).T
+        path = np.array(path)
         return path
 
 
 def main():
-    # Set map information
-    map_filename = "myhal.png"
-    map_setings_filename = "myhal.yaml"
-
-    # robot information
-    goal_point = np.array([[7], [0]])  # m
-    stopping_dist = 0.2  # m
-
-    # RRT precursor
+    map_settings, map_settings_filename, goal_point = None, None, None
+    stopping_dist = 0.5
+    goal_point
+    
+    if IS_MYHAL:
+        map_filename = "myhal.png"
+        map_settings_filename = "myhal.yaml"
+        goal_point = np.array([[7], [0]])  # m
+    else:
+        map_filename = "willowgarageworld_05res.png"
+        map_settings_filename = "willowgarageworld_05res.yaml"
+        goal_point = np.array([[42], [-44]])  # m
+        
+    
     path_planner = PathPlanner(
-        map_filename, map_setings_filename, goal_point, stopping_dist
+        map_filename, map_settings_filename, goal_point, stopping_dist
     )
-    nodes = path_planner.rrt_planning()
-    node_path_metric = path_planner.recover_path()
 
-    # Leftover test functions
-    np.save("shortest_path_rrt_heuristic.npy", node_path_metric)
+    if IS_RRT_STAR:
+        nodes = path_planner.rrt_star_planning()
+        node_path_metric = np.hstack(path_planner.recover_path())
+        np.save("shortest_path_rrt_star.npy", node_path_metric)
+    else:
+        nodes = path_planner.rrt_planning()
+        node_path_metric = np.hstack(path_planner.recover_path())
+        np.save("shortest_path_rrt.npy", node_path_metric)
 
 
 if __name__ == "__main__":

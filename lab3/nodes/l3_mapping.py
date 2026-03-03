@@ -7,6 +7,7 @@ import tf2_ros
 from skimage.draw import line as ray_trace
 import rospkg
 import matplotlib.pyplot as plt
+import math
 
 # msgs
 from nav_msgs.msg import OccupancyGrid, MapMetaData
@@ -91,13 +92,37 @@ class OccupancyGripMap:
         odom_map[0] = odom_map_tf.translation.x
         odom_map[1] = odom_map_tf.translation.y
         odom_map[2] = euler_from_ros_quat(odom_map_tf.rotation)[2]
+        
+        # ------------ INSERT OUR CODE ------------
 
-        # YOUR CODE HERE!!! Loop through each measurement in scan_msg to get the correct angle and
+        # Loop through each measurement in scan_msg to get the correct angle and
         # x_start and y_start to send to your ray_trace_update function.
+        
+        # Iterate through recorded beams
+        for i in range(len(scan_msg.ranges)):
+            dist = scan_msg.ranges[i] # beam distance, inf = free, no hit
+            # the first beam is at +X, and by RHR, sweeps CCW towards +Y
+            # i.e. increases with cos
+            angle_wrt_robot_x = scan_msg.angle_min + i*scan_msg.angle_increment
+            angle_wrt_map_x = odom_map[2] + angle_wrt_robot_x
+            # Call ray trace update
+            new_map, new_log_odds = self.ray_trace_update(
+                map=self.np_map,
+                log_odds=self.log_odds,
+                x_start=odom_map[0],
+                y_start=odom_map[1],
+                angle=angle_wrt_map_x,
+                range_mes=dist # inf = free, no hit
+            )
+            # Update values
+            self.np_map = new_map
+            self.log_odds = new_log_odds
+        
+        # ------------------ DONE ----------------
 
         # publish the message
         self.map_msg.info.map_load_time = rospy.Time.now()
-        self.map_msg.data = self.np_map.flatten()
+        self.map_msg.data = self.np_map.flatten().tolist()
         self.map_pub.publish(self.map_msg)
 
     def ray_trace_update(self, map, log_odds, x_start, y_start, angle, range_mes):
@@ -112,9 +137,29 @@ class OccupancyGripMap:
         :param range_mes: The range of the measurement along the ray.
         :return: The numpy map and the log odds updated along a single ray.
         """
-        # YOUR CODE HERE!!! You should modify the log_odds object and the numpy map based on the outputs from
+        
+        # ------------ INSERT OUR CODE ------------
+        
+        # You should modify the log_odds object and the numpy map based on the outputs from
         # ray_trace and the equations from class. Your numpy map must be an array of int8s with 0 to 100 representing
         # probability of occupancy, and -1 representing unknown.
+        
+        # Compute x_end, y_end for each ray
+        x_end, y_end = round(x_start + np.cos(angle)*range_mes), round(y_start + np.sin(angle)*range_mes)
+        rr, cc = ray_trace(int(x_start), int(y_start), int(x_end), int(y_end))
+        for (x, y) in list(zip(cc, rr)): # order-swap intended
+            # Determine update value for cell based on ray
+            dist = np.sqrt( (x-x_start)**2 + (y-y_start)**2 )
+            at_measured_range = np.isclose(dist, range_mes, atol=1) # i.e. is it the adjacent cell?
+            update_val = ALPHA if at_measured_range else -BETA
+            
+            # Update log odds
+            log_odds[x, y] += update_val
+            
+            # Update map
+            new_odds = self.log_odds_to_probability(log_odds[x, y])
+            map[x, y] = 0 if math.isnan(new_odds) else int(new_odds * 100)
+        # ------------------ DONE ----------------
 
         return map, log_odds
 

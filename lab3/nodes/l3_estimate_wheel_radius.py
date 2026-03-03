@@ -8,7 +8,7 @@ from std_msgs.msg import Empty
 from geometry_msgs.msg import Twist
 
 INT32_MAX = 2**31
-DRIVEN_DISTANCE = 0.75 #in meters
+DRIVEN_DISTANCE = 1.2192 # in meters from lab handout -> the starter code said 0.75 meters
 TICKS_PER_ROTATION = 4096
 
 class wheelRadiusEstimator():
@@ -50,7 +50,7 @@ class wheelRadiusEstimator():
     def sensorCallback(self, msg):
         #Retrieve the encoder data form the sensor state msg
         self.lock.acquire()
-        if self.left_encoder_prev is None or self.left_encoder_prev is None: 
+        if (self.left_encoder_prev is None) or (self.right_encoder_prev is None): 
             self.left_encoder_prev = msg.left_encoder #int32
             self.right_encoder_prev = msg.right_encoder #int32
         else:
@@ -72,12 +72,34 @@ class wheelRadiusEstimator():
 
         elif self.isMoving is True and np.isclose(input_velocity_mag, 0):
             self.isMoving = False #Set the state to stopped
+            
+            self.lock.acquire() # ought to have lock when reading encoders
 
-            # # YOUR CODE HERE!!!
-            # Calculate the radius of the wheel based on encoder measurements
-
-            # radius = ##
-            # print('Calibrated Radius: {} m'.format(radius))
+            # ------------ INSERT OUR CODE ------------
+            
+            # Goal is to compute wheel radius
+            # The robot has just traveled DRIVEN_DISTANCE meters
+            # The total circumference swept by each wheel will be:
+            #    C = DRIVEN_DISTANCE
+            # Each wheel's encoder values will return the traveled distance
+            # i.e. the wheels sweep out C
+            # Both encoders will differ due to error, so it may be best to take their average
+            # Each full rotation of the wheel is (2*pi)*WHEEL_RADIUS
+            # Each full rotation of the wheel is also TICKS_PER_ROTATION from the encoder
+            # The distance swept by each wheel is thus:
+            #    d = {(# encoder ticks) / TICKS_PER_ROTATION} * \    num rotations *
+            #       {(2*pi)*radius}                                  distance per rotation
+            # So the corresponding radius of each wheel (equating d and C) is thus:
+            #    radius = DRIVEN_DISTANCE / { (2*pi) * (# encoder ticks / TICKS_PER_ROTATION) }
+            # Taking the average (in theory they should be equal) of both wheel's radius values:
+            #    r_avg = (0.5 * (r_l + r_r))
+            
+            r_l = abs(DRIVEN_DISTANCE / (2*np.pi*(self.del_left_encoder / TICKS_PER_ROTATION)))
+            r_r = abs(DRIVEN_DISTANCE / (2*np.pi*(self.del_right_encoder / TICKS_PER_ROTATION)))
+            radius = 0.5*(r_l + r_r) # average
+            
+            # ------------------ DONE -----------------
+            print('Calibrated Radius: {} m'.format(radius))
 
             #Reset the robot and calibration routine
             self.lock.acquire()

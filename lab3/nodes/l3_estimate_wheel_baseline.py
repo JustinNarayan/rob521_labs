@@ -12,6 +12,25 @@ NUM_ROTATIONS = 3
 TICKS_PER_ROTATION = 4096
 WHEEL_RADIUS = 0.066 / 2 #In meters
 
+'''
+VALIDATION
+
+Terminal 1 >> `roscore`
+Terminal 2 >> `rosrun rob521_lab3 l3_estimate_wheel_baseline.py`
+Terminal 3 >> `rosbag play <path to lab 3>/rosbags/three_rotations.py`
+
+Output (Terminal 2):
+Ready to start wheel radius calibration!
+Starting Calibration Procedure
+Calibrated Separation: 0.29522216796875 m
+Resetted the robot to calibrate again!
+
+
+COMPARISON:
+Expected baseline: 287mm
+Observed baseline: 295mm
+'''
+
 
 class wheelBaselineEstimator():
     def __init__(self):
@@ -52,7 +71,7 @@ class wheelBaselineEstimator():
     def sensorCallback(self, msg):
         #Retrieve the encoder data form the sensor state msg
         self.lock.acquire()
-        if self.left_encoder_prev is None or self.left_encoder_prev is None: 
+        if (self.left_encoder_prev is None) or (self.right_encoder_prev is None): 
             self.left_encoder_prev = msg.left_encoder #int32
             self.right_encoder_prev = msg.right_encoder #int32
         else:
@@ -71,17 +90,39 @@ class wheelBaselineEstimator():
             self.isMoving = True #Set state to moving
             print('Starting Calibration Procedure')
 
-        elif self.isMoving is True and np.isclose(msg.angular.z, 0):
+        elif self.isMoving is True and np.isclose(msg.angular.z, 0,atol=1e-20):
             self.isMoving = False #Set the state to stopped
+            
+            self.lock.acquire() # ought to have lock when reading encoders
 
-            # # YOUR CODE HERE!!!
-            # Calculate the radius of the wheel based on encoder measurements
-
-            # separation = ##
-            # print('Calibrated Separation: {} m'.format(separation))
+            # ------------ INSERT OUR CODE ------------
+            
+            # Goal is to compute the wheel separation / baseline
+            # The robot has just performed three rotations
+            # i.e. the wheels have swept an angular distance of NUM_ROTATIONS*(2*pi)
+            # The total circumference swept by each wheel will be:
+            #    C = (NUM_ROTATIONS) * pi * baseline = [3 * (2 * pi * radius)]
+            # Each wheel's encoder values will return the traveled distance
+            # i.e. the wheels sweep out C
+            # Both encoders will differ due to error, so it may be best to take their average
+            # Each full rotation of the wheel is (2*pi)*WHEEL_RADIUS
+            # Each full rotation of the wheel is also TICKS_PER_ROTATION from the encoder
+            # The distance swept by each wheel is thus:
+            #    d = {(# encoder ticks) / TICKS_PER_ROTATION} * \    num rotations *
+            #       {(2*pi)*WHEEL_RADIUS}                            distance per rotation
+            # Taking the average (in theory they should be equal) of both wheel's d values:
+            #    baseline = (0.5 * (d_l + d_r)) / (NUM_ROTATIONS * pi)
+            
+            d_l = abs(self.del_left_encoder / TICKS_PER_ROTATION) * (2*np.pi*WHEEL_RADIUS)
+            d_r = abs(self.del_right_encoder / TICKS_PER_ROTATION) * (2*np.pi*WHEEL_RADIUS)
+            d_avg = 0.5*(d_l + d_r)
+            
+            separation = d_avg / (NUM_ROTATIONS *  np.pi)
+            
+            # ------------------ DONE -----------------
+            print('Calibrated Separation: {} m'.format(separation))
 
             #Reset the robot and calibration routine
-            self.lock.acquire()
             self.left_encoder_prev = None
             self.right_encoder_prev = None
             self.del_left_encoder = 0

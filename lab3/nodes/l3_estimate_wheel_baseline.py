@@ -12,6 +12,25 @@ NUM_ROTATIONS = 3
 TICKS_PER_ROTATION = 4096
 WHEEL_RADIUS = 0.066 / 2 #In meters
 
+'''
+VALIDATION
+
+Terminal 1 >> `roscore`
+Terminal 2 >> `rosrun rob521_lab3 l3_estimate_wheel_baseline.py`
+Terminal 3 >> `rosbag play <path to lab 3>/rosbags/three_rotations.py`
+
+Output (Terminal 2):
+Ready to start wheel radius calibration!
+Starting Calibration Procedure
+Calibrated Separation: 0.29522216796875 m
+Resetted the robot to calibrate again!
+
+
+COMPARISON:
+Expected baseline: 287mm
+Observed baseline: 295mm
+'''
+
 
 class wheelBaselineEstimator():
     def __init__(self):
@@ -71,7 +90,7 @@ class wheelBaselineEstimator():
             self.isMoving = True #Set state to moving
             print('Starting Calibration Procedure')
 
-        elif self.isMoving is True and np.isclose(msg.angular.z, 0):
+        elif self.isMoving is True and np.isclose(msg.angular.z, 0,atol=1e-20):
             self.isMoving = False #Set the state to stopped
             
             self.lock.acquire() # ought to have lock when reading encoders

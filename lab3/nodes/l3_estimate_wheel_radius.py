@@ -11,6 +11,23 @@ INT32_MAX = 2**31
 DRIVEN_DISTANCE = 1.2192 # in meters from lab handout -> the starter code said 0.75 meters
 TICKS_PER_ROTATION = 4096
 
+'''
+VALIDATION
+
+Terminal 1 >> `roscore`
+Terminal 2 >> `rosrun rob521_lab3 l3_estimate_wheel_radius.py`
+Terminal 3 >> `rosbag play <path to lab 3>/rosbags/straight_line.py`
+
+Output (Terminal 2):
+Ready to start wheel radius calibration!
+Starting Calibration Procedure
+Calibrated Radius: 0.032535556145590325 m
+
+COMPARISON:
+Expected baseline: 33mm
+Observed baseline: 32.5mm
+'''
+
 class wheelRadiusEstimator():
     def __init__(self):
         rospy.init_node('encoder_data', anonymous=True) # Initialize node

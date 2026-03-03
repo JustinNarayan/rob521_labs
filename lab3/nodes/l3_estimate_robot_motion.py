@@ -39,6 +39,9 @@ Wheel Odom: x: -0.048, y: -0.030, t: -2.783
 Turtlebot3 Odom: x: 0.005, y: -0.039, t: -3.120
 
 COMPARISON:
+Expected init state (x,y,θ): [ 0.000 m, 0.000 m, 3.142 rad]
+Observed init state (x,y,θ): [ 0.000 m, 0.002 m, 3.137 rad]
+
 Expected final state (x,y,θ): [ 0.005 m, -0.039 m, -3.120 rad]
 Observed final state (x,y,θ): [-0.048 m, -0.030 m, -2.783 rad]
 '''

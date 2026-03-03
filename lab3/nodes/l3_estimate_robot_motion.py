@@ -23,6 +23,28 @@ RAD_PER_TICK = 0.001533981
 WHEEL_RADIUS = .066 / 2
 BASELINE = .287 / 2
 
+'''
+VALIDATION
+
+Terminal 1 >> `roscore`
+Terminal 2 >> `rosrun rob521_lab3 l3_estimate_robot_motion.py`
+Terminal 3 >> `rosbag play <path to lab 3>/rosbags/loop.py`
+
+Output (Terminal 2):
+...
+Wheel Odom: x: 0.000, y: 0.000, t: 3.142
+Turtlebot3 Odom: x: 0.000, y: 0.002, t: 3.137
+...
+Wheel Odom: x: -0.048, y: -0.030, t: -2.783
+Turtlebot3 Odom: x: 0.005, y: -0.039, t: -3.120
+
+COMPARISON:
+Expected init state (x,y,θ): [ 0.000 m, 0.000 m, 3.142 rad]
+Observed init state (x,y,θ): [ 0.000 m, 0.002 m, 3.137 rad]
+
+Expected final state (x,y,θ): [ 0.005 m, -0.039 m, -3.120 rad]
+Observed final state (x,y,θ): [-0.048 m, -0.030 m, -2.783 rad]
+'''
 
 class WheelOdom:
     def __init__(self):
@@ -42,7 +64,14 @@ class WheelOdom:
         self.wheel_odom_tf.header.frame_id = 'odom'
         self.wheel_odom_tf.child_frame_id = 'wo_base_link'
         self.pose = Pose()
-        self.pose.orientation.w = 1.0
+        # ------------ INSERT OUR CODE ------------
+        # The ROS bag we're simulating starts at an Euler z of 3.137 (~ pi)
+        # Why on Earth doesn't the starter code also make us start at the same orientation?
+        # What a dumb oversight, that sets us up to fail.
+        self.pose.orientation = ros_quat_from_euler(
+            np.array([0, 0, np.pi])
+        )
+        # ------------------ DONE -----------------
         self.twist = Twist()
         self.last_enc_l = None
         self.last_enc_r = None
@@ -74,20 +103,60 @@ class WheelOdom:
             self.last_time = sensor_state_msg.header.stamp
         else:
             # update calculated pose and twist with new data
-            le = sensor_state_msg.left_encoder
+            le = sensor_state_msg.left_encoder 
             re = sensor_state_msg.right_encoder
+            time = sensor_state_msg.header.stamp
 
-            # # YOUR CODE HERE!!!
-            # Update your odom estimates with the latest encoder measurements and populate the relevant area
-            # of self.pose and self.twist with estimated position, heading and velocity
+            # ------------ INSERT OUR CODE ------------
+            
+            # Extract yaw (euler angle z)
+            euler = euler_from_ros_quat(self.pose.orientation)
+            
+            # Determine trigonometric values based on assumed (i.e. approx) theta at start of update
+            cos_theta, sin_theta = np.cos(euler[2]), np.sin(euler[2])
+            
+            # Determine dx, dy, dt (dtheta)
+            # θ used is assumed (i.e. approx) theta
+            # r used is wheel radius (assumed to be equal)
+            # b used is baseline
+            # le, re should be in radians
+            #
+            #  ----     ---------   ----------------   ----
+            # | dx |   | cos_θ 0 | |  (r/2)   (r/2) | | re |
+            # | dy | = | sin_θ 0 | | (r/2b) -(r/2b) | | le |
+            # | dθ |   |   0   1 |  ----------------   ----
+            #  ---      ---------
+            
+            # Convert encoder readings to radians
+            del_le_rad, del_re_rad = \
+                (le - self.last_enc_l)*RAD_PER_TICK, (re - self.last_enc_r)*RAD_PER_TICK
+            
+            # Compute pose changes
+            dx = cos_theta * ( (WHEEL_RADIUS/2)*(del_re_rad + del_le_rad) )
+            dy = sin_theta * ( (WHEEL_RADIUS/2)*(del_re_rad + del_le_rad) )
+            dtheta = ( (WHEEL_RADIUS/(2*BASELINE))*del_re_rad ) \
+                - ( (WHEEL_RADIUS/(2*BASELINE))*del_le_rad )
+                
+            # Differentiate pose changes by time
+            dt = max( (time - self.last_time).to_sec() , 1e-10) # will be > 0
+            x_dot, y_dot, theta_dot = dx/dt, dy/dt, dtheta/dt
 
-            # self.pose.position.x = xx
-            # self.pose.position.y = xx
-            # self.pose.orientation = xx
-
-            # self.twist.linear.x = mu_dot[0].item()
-            # self.twist.linear.y = mu_dot[1].item()
-            # self.twist.angular.z = mu_dot[2].item()
+            # Update odometry message
+            self.pose.position.x += dx
+            self.pose.position.y += dy
+            self.pose.orientation = ros_quat_from_euler(
+                np.array([euler[0], euler[1], euler[2] + dtheta]) # add yaw to initial euler angle and convert to quaternion
+            )
+            self.twist.linear.x = x_dot
+            self.twist.linear.y = y_dot
+            self.twist.angular.z = theta_dot
+            
+            # Update most recent encoder values
+            self.last_enc_l = le
+            self.last_enc_r = re
+            self.last_time = time
+            
+            # ------------------ DONE -----------------
 
             # publish the updates as a topic and in the tf tree
             current_time = rospy.Time.now()
@@ -103,13 +172,13 @@ class WheelOdom:
             self.bag.write('odom_est', self.wheel_odom)
 
             # for testing against actual odom
-            # print("Wheel Odom: x: %2.3f, y: %2.3f, t: %2.3f" % (
-            #     self.pose.position.x, self.pose.position.y, mu[2].item()
-            # ))
-            # print("Turtlebot3 Odom: x: %2.3f, y: %2.3f, t: %2.3f" % (
-            #     self.odom.pose.pose.position.x, self.odom.pose.pose.position.y,
-            #     euler_from_ros_quat(self.odom.pose.pose.orientation)[2]
-            # ))
+            print("Wheel Odom: x: %2.3f, y: %2.3f, t: %2.3f" % (
+                self.pose.position.x, self.pose.position.y, euler_from_ros_quat(self.pose.orientation)[2]
+            ))
+            print("Turtlebot3 Odom: x: %2.3f, y: %2.3f, t: %2.3f" % (
+                self.odom.pose.pose.position.x, self.odom.pose.pose.position.y,
+                euler_from_ros_quat(self.odom.pose.pose.orientation)[2]
+            ))
 
     def odom_cb(self, odom_msg):
         # get odom from turtlebot3 packages

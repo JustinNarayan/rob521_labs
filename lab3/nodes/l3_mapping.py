@@ -99,12 +99,12 @@ class OccupancyGripMap:
         # x_start and y_start to send to your ray_trace_update function.
         
         # Iterate through recorded beams
-        for i in range(len(scan_msg.ranges)):
+        for i in range(0, len(scan_msg.ranges), SCAN_DOWNSAMPLE):
             dist = scan_msg.ranges[i] # beam distance, inf = free, no hit
             # the first beam is at +X, and by RHR, sweeps CCW towards +Y
             # i.e. increases with cos
             angle_wrt_robot_x = scan_msg.angle_min + i*scan_msg.angle_increment
-            angle_wrt_map_x = odom_map[2] + angle_wrt_robot_x
+            angle_wrt_map_x = angle_wrt_robot_x + odom_map[2]
             # Call ray trace update
             new_map, new_log_odds = self.ray_trace_update(
                 map=self.np_map,
@@ -112,7 +112,9 @@ class OccupancyGripMap:
                 x_start=odom_map[0],
                 y_start=odom_map[1],
                 angle=angle_wrt_map_x,
-                range_mes=dist # inf = free, no hit
+                range_mes=dist, # inf = free, no hit
+                at_inf=(not np.isfinite(dist)) or (dist >= scan_msg.range_max),
+                max_range=scan_msg.range_max
             )
             # Update values
             self.np_map = new_map
@@ -122,10 +124,10 @@ class OccupancyGripMap:
 
         # publish the message
         self.map_msg.info.map_load_time = rospy.Time.now()
-        self.map_msg.data = self.np_map.flatten().tolist()
+        self.map_msg.data = self.np_map.flatten()
         self.map_pub.publish(self.map_msg)
 
-    def ray_trace_update(self, map, log_odds, x_start, y_start, angle, range_mes):
+    def ray_trace_update(self, map, log_odds, x_start, y_start, angle, range_mes, at_inf, max_range):
         """
         A ray tracing grid update as described in the lab document.
 
@@ -145,20 +147,40 @@ class OccupancyGripMap:
         # probability of occupancy, and -1 representing unknown.
         
         # Compute x_end, y_end for each ray
-        x_end, y_end = round(x_start + np.cos(angle)*range_mes), round(y_start + np.sin(angle)*range_mes)
-        rr, cc = ray_trace(int(x_start), int(y_start), int(x_end), int(y_end))
-        for (x, y) in list(zip(cc, rr)): # order-swap intended
-            # Determine update value for cell based on ray
-            dist = np.sqrt( (x-x_start)**2 + (y-y_start)**2 )
-            at_measured_range = np.isclose(dist, range_mes, atol=1) # i.e. is it the adjacent cell?
-            update_val = ALPHA if at_measured_range else -BETA
+        range_eff = max_range if at_inf else range_mes
+        x_end, y_end = x_start + np.cos(angle)*range_eff, y_start + np.sin(angle)*range_eff
+        rr, cc = ray_trace(
+            int(y_start / CELL_SIZE),
+            int(x_start / CELL_SIZE),  
+            int(y_end / CELL_SIZE),
+            int(x_end / CELL_SIZE)
+        )
+        
+        num_pts = len(rr)
+        for idx, (r, c) in enumerate(list(zip(rr, cc))):
             
-            # Update log odds
-            log_odds[x, y] += update_val
+            # Ignore out of bounds
+            if  (r < 0) or (r >= self.map_msg.info.height) or \
+                (c < 0) or (c >= self.map_msg.info.width):
+                continue
+            
+            # Infinite range, all values free
+            if at_inf:
+                update_val = -BETA
+            else:
+                at_obs = idx >= (num_pts - NUM_PTS_OBSTACLE)
+                
+                # Final pixels are the obstacle
+                if at_obs:
+                    update_val = ALPHA
+                else:
+                    update_val = -BETA
+            
+            # Log odds
+            log_odds[r, c] += update_val
             
             # Update map
-            new_odds = self.log_odds_to_probability(log_odds[x, y])
-            map[x, y] = 0 if math.isnan(new_odds) else int(new_odds * 100)
+            map[r, c] = int(self.log_odds_to_probability(log_odds[r, c]) * 100)
         # ------------------ DONE ----------------
 
         return map, log_odds

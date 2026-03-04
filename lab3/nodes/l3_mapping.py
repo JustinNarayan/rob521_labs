@@ -20,10 +20,10 @@ from utils import convert_pose_to_tf, convert_tf_to_pose, euler_from_ros_quat, \
 
 ALPHA = 1
 BETA = 1
-MAP_DIM = (4, 4)
+MAP_DIM = (6, 6)
 CELL_SIZE = .01
-NUM_PTS_OBSTACLE = 3
-SCAN_DOWNSAMPLE = 1
+NUM_PTS_OBSTACLE = 4
+SCAN_DOWNSAMPLE = 3
 
 class OccupancyGripMap:
     def __init__(self):
@@ -106,19 +106,13 @@ class OccupancyGripMap:
             angle_wrt_robot_x = scan_msg.angle_min + i*scan_msg.angle_increment
             angle_wrt_map_x = angle_wrt_robot_x + odom_map[2]
             # Call ray trace update
-            new_map, new_log_odds = self.ray_trace_update(
-                map=self.np_map,
-                log_odds=self.log_odds,
+            self.ray_trace_update(
                 x_start=odom_map[0],
                 y_start=odom_map[1],
                 angle=angle_wrt_map_x,
-                range_mes=dist, # inf = free, no hit
-                at_inf=(not np.isfinite(dist)) or (dist >= scan_msg.range_max),
-                max_range=scan_msg.range_max
+                range_mes=dist,
+                range_max=scan_msg.range_max
             )
-            # Update values
-            self.np_map = new_map
-            self.log_odds = new_log_odds
         
         # ------------------ DONE ----------------
 
@@ -127,7 +121,7 @@ class OccupancyGripMap:
         self.map_msg.data = self.np_map.flatten()
         self.map_pub.publish(self.map_msg)
 
-    def ray_trace_update(self, map, log_odds, x_start, y_start, angle, range_mes, at_inf, max_range):
+    def ray_trace_update(self, x_start, y_start, angle, range_mes, range_max):
         """
         A ray tracing grid update as described in the lab document.
 
@@ -146,45 +140,51 @@ class OccupancyGripMap:
         # ray_trace and the equations from class. Your numpy map must be an array of int8s with 0 to 100 representing
         # probability of occupancy, and -1 representing unknown.
         
-        # Compute x_end, y_end for each ray
-        range_eff = max_range if at_inf else range_mes
-        x_end, y_end = x_start + np.cos(angle)*range_eff, y_start + np.sin(angle)*range_eff
-        rr, cc = ray_trace(
-            int(y_start / CELL_SIZE),
-            int(x_start / CELL_SIZE),  
-            int(y_end / CELL_SIZE),
-            int(x_end / CELL_SIZE)
-        )
+        at_inf = (range_mes == np.inf) or (range_mes > range_max)
         
-        num_pts = len(rr)
-        for idx, (r, c) in enumerate(list(zip(rr, cc))):
-            
-            # Ignore out of bounds
-            if  (r < 0) or (r >= self.map_msg.info.height) or \
-                (c < 0) or (c >= self.map_msg.info.width):
+        # Compute x_end, y_end for each ray
+        x_end = x_start + np.cos(angle)*(range_max if at_inf else range_mes)
+        y_end = y_start + np.sin(angle)*(range_max if at_inf else range_mes)
+        
+        # Get the pixel coordiantes
+        x_from_px = int( x_start / CELL_SIZE )
+        y_from_px = int( y_start / CELL_SIZE )
+        x_to_px =   int( x_end / CELL_SIZE )
+        y_to_px =   int( y_end / CELL_SIZE )
+        
+        # Get indices of x and y
+        xs, ys = ray_trace(x_from_px, y_from_px, x_to_px, y_to_px)
+        
+        # Iterate through points
+        num_pts = len(xs)
+        for idx in range(num_pts):
+            # Ignore if out of bounds
+            if  (xs[idx] < 0) or (xs[idx] >= self.map_msg.info.width) or \
+                (ys[idx] < 0) or (ys[idx] >= self.map_msg.info.height):
                 continue
+            # Ignore inf
+            # if at_inf:
+            #     continue
             
-            # Infinite range, all values free
-            if at_inf:
+            update_val = 0
+            
+            # At obstacle
+            if at_inf or (idx < (num_pts - NUM_PTS_OBSTACLE)):
                 update_val = -BETA
+            # Not at obstacle
             else:
-                at_obs = idx >= (num_pts - NUM_PTS_OBSTACLE)
-                
-                # Final pixels are the obstacle
-                if at_obs:
-                    update_val = ALPHA
-                else:
-                    update_val = -BETA
+                update_val = ALPHA
             
-            # Log odds
-            log_odds[r, c] += update_val
+            # Update odds
+            self.log_odds[ys[idx], xs[idx]] += update_val
             
-            # Update map
-            map[r, c] = int(self.log_odds_to_probability(log_odds[r, c]) * 100)
+            # Convert to map
+            self.np_map[ys[idx], xs[idx]] = int(
+                self.log_odds_to_probability(self.log_odds[ys[idx], xs[idx]]) * 100
+            )
+        
         # ------------------ DONE ----------------
-
-        return map, log_odds
-
+    
     def log_odds_to_probability(self, values):
         # print(values)
         return np.exp(values) / (1 + np.exp(values))

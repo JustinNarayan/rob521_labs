@@ -18,12 +18,21 @@ from utils import convert_pose_to_tf, convert_tf_to_pose, euler_from_ros_quat, \
      tf_to_tf_mat, tf_mat_to_tf
 
 
-ALPHA = 1
+ALPHA = 2
 BETA = 1
-MAP_DIM = (6, 6)
+MAP_DIM = (4, 4)
 CELL_SIZE = .01
-NUM_PTS_OBSTACLE = 4
-SCAN_DOWNSAMPLE = 3
+NUM_PTS_OBSTACLE = 5
+SCAN_DOWNSAMPLE = 4
+
+'''
+VALIDATION
+
+Terminal 1 >> `roslaunch rob521_lab3 turtlebot3_world.launch`
+Terminal 2 >> `roslaunch rob521_lab3 mapping_rviz.launch`
+Terminal 3 >> `rosrun rob521_lab3 l3_mapping.py`
+Terminal 4 >> `roslaunch turtlebot3_teleop turtlebot3_teleop_key.launch'
+'''
 
 class OccupancyGripMap:
     def __init__(self):
@@ -168,10 +177,10 @@ class OccupancyGripMap:
             
             update_val = 0
             
-            # At obstacle
+            # Not at obstacle
             if at_inf or (idx < (num_pts - NUM_PTS_OBSTACLE)):
                 update_val = -BETA
-            # Not at obstacle
+            # At obstacle
             else:
                 update_val = ALPHA
             

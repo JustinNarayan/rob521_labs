@@ -7,6 +7,7 @@ import tf2_ros
 from skimage.draw import line as ray_trace
 import rospkg
 import matplotlib.pyplot as plt
+import math
 
 # msgs
 from nav_msgs.msg import OccupancyGrid, MapMetaData
@@ -17,12 +18,21 @@ from utils import convert_pose_to_tf, convert_tf_to_pose, euler_from_ros_quat, \
      tf_to_tf_mat, tf_mat_to_tf
 
 
-ALPHA = 1
+ALPHA = 2
 BETA = 1
 MAP_DIM = (4, 4)
 CELL_SIZE = .01
-NUM_PTS_OBSTACLE = 3
-SCAN_DOWNSAMPLE = 1
+NUM_PTS_OBSTACLE = 5
+SCAN_DOWNSAMPLE = 4
+
+'''
+VALIDATION
+
+Terminal 1 >> `roslaunch rob521_lab3 turtlebot3_world.launch`
+Terminal 2 >> `roslaunch rob521_lab3 mapping_rviz.launch`
+Terminal 3 >> `rosrun rob521_lab3 l3_mapping.py`
+Terminal 4 >> `roslaunch turtlebot3_teleop turtlebot3_teleop_key.launch'
+'''
 
 class OccupancyGripMap:
     def __init__(self):
@@ -91,16 +101,36 @@ class OccupancyGripMap:
         odom_map[0] = odom_map_tf.translation.x
         odom_map[1] = odom_map_tf.translation.y
         odom_map[2] = euler_from_ros_quat(odom_map_tf.rotation)[2]
+        
+        # ------------ INSERT OUR CODE ------------
 
-        # YOUR CODE HERE!!! Loop through each measurement in scan_msg to get the correct angle and
+        # Loop through each measurement in scan_msg to get the correct angle and
         # x_start and y_start to send to your ray_trace_update function.
+        
+        # Iterate through recorded beams
+        for i in range(0, len(scan_msg.ranges), SCAN_DOWNSAMPLE):
+            dist = scan_msg.ranges[i] # beam distance, inf = free, no hit
+            # the first beam is at +X, and by RHR, sweeps CCW towards +Y
+            # i.e. increases with cos
+            angle_wrt_robot_x = scan_msg.angle_min + i*scan_msg.angle_increment
+            angle_wrt_map_x = angle_wrt_robot_x + odom_map[2]
+            # Call ray trace update
+            self.ray_trace_update(
+                x_start=odom_map[0],
+                y_start=odom_map[1],
+                angle=angle_wrt_map_x,
+                range_mes=dist,
+                range_max=scan_msg.range_max
+            )
+        
+        # ------------------ DONE ----------------
 
         # publish the message
         self.map_msg.info.map_load_time = rospy.Time.now()
         self.map_msg.data = self.np_map.flatten()
         self.map_pub.publish(self.map_msg)
 
-    def ray_trace_update(self, map, log_odds, x_start, y_start, angle, range_mes):
+    def ray_trace_update(self, x_start, y_start, angle, range_mes, range_max):
         """
         A ray tracing grid update as described in the lab document.
 
@@ -112,12 +142,58 @@ class OccupancyGripMap:
         :param range_mes: The range of the measurement along the ray.
         :return: The numpy map and the log odds updated along a single ray.
         """
-        # YOUR CODE HERE!!! You should modify the log_odds object and the numpy map based on the outputs from
+        
+        # ------------ INSERT OUR CODE ------------
+        
+        # You should modify the log_odds object and the numpy map based on the outputs from
         # ray_trace and the equations from class. Your numpy map must be an array of int8s with 0 to 100 representing
         # probability of occupancy, and -1 representing unknown.
-
-        return map, log_odds
-
+        
+        at_inf = (range_mes == np.inf) or (range_mes > range_max)
+        
+        # Compute x_end, y_end for each ray
+        x_end = x_start + np.cos(angle)*(range_max if at_inf else range_mes)
+        y_end = y_start + np.sin(angle)*(range_max if at_inf else range_mes)
+        
+        # Get the pixel coordiantes
+        x_from_px = int( x_start / CELL_SIZE )
+        y_from_px = int( y_start / CELL_SIZE )
+        x_to_px =   int( x_end / CELL_SIZE )
+        y_to_px =   int( y_end / CELL_SIZE )
+        
+        # Get indices of x and y
+        xs, ys = ray_trace(x_from_px, y_from_px, x_to_px, y_to_px)
+        
+        # Iterate through points
+        num_pts = len(xs)
+        for idx in range(num_pts):
+            # Ignore if out of bounds
+            if  (xs[idx] < 0) or (xs[idx] >= self.map_msg.info.width) or \
+                (ys[idx] < 0) or (ys[idx] >= self.map_msg.info.height):
+                continue
+            # Ignore inf
+            # if at_inf:
+            #     continue
+            
+            update_val = 0
+            
+            # Not at obstacle
+            if at_inf or (idx < (num_pts - NUM_PTS_OBSTACLE)):
+                update_val = -BETA
+            # At obstacle
+            else:
+                update_val = ALPHA
+            
+            # Update odds
+            self.log_odds[ys[idx], xs[idx]] += update_val
+            
+            # Convert to map
+            self.np_map[ys[idx], xs[idx]] = int(
+                self.log_odds_to_probability(self.log_odds[ys[idx], xs[idx]]) * 100
+            )
+        
+        # ------------------ DONE ----------------
+    
     def log_odds_to_probability(self, values):
         # print(values)
         return np.exp(values) / (1 + np.exp(values))

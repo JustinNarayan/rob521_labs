@@ -28,6 +28,31 @@ Expected baseline: 33mm
 Observed baseline: 32.5mm
 '''
 
+'''
+In-lab
+
+rosrun rob521_lab3 l3_estimate_wheel_radius.py
+
+<Manually test the trial on uneven surface to verify it works>
+
+Ready to start wheel radius calibration!
+Starting Calibration Procedure
+Calibrated Radius: 0.03233173327631951 m
+
+Ready to start wheel radius calibration!
+Starting Calibration Procedure
+Calibrated Radius: 0.031182487420275698 m
+
+<Manually run the test on the main room tiles>
+
+Ready to start wheel radius calibration!
+Starting Calibration Procedure
+Calibrated Radius: 0.0332147114507856 m
+
+Final answer: 0.0332147114507856 m
+
+'''
+
 class wheelRadiusEstimator():
     def __init__(self):
         rospy.init_node('encoder_data', anonymous=True) # Initialize node

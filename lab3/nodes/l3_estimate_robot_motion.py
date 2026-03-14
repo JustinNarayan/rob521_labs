@@ -46,6 +46,32 @@ Expected final state (x,y,θ): [ 0.005 m, -0.039 m, -3.120 rad]
 Observed final state (x,y,θ): [-0.048 m, -0.030 m, -2.783 rad]
 '''
 
+
+'''
+
+<Attempt to manually navigate 1m radius circle on the main tiles>
+
+Start:
+Wheel Odom: x: 0.000, y: 0.000, t: 3.141
+Turtlebot3 Odom: x: 0.000, y: 0.000, t: 3.108
+
+Final:
+Wheel Odom: x: -0.209, y: -0.042, t: -2.298
+Turtlebot3 Odom: x: 0.020, y: 0.004, t: -2.685
+
+<Visually, it appeared to end at the same place (within 5cm) but rotated about 30deg (0.5rad)>
+
+Start:
+Wheel Odom: x: 0.000, y: 0.000, t: 3.140
+Turtlebot3 Odom: x: 0.000, y: 0.000, t: -3.120
+
+Wheel Odom: x: 0.378, y: -0.047, t: 2.629
+Turtlebot3 Odom: x: 0.322, y: 0.560, t: -3.001
+
+<This one skidded quite a lot>
+
+'''
+
 class WheelOdom:
     def __init__(self):
         # publishers, subscribers, tf broadcaster
@@ -69,7 +95,7 @@ class WheelOdom:
         # Why on Earth doesn't the starter code also make us start at the same orientation?
         # What a dumb oversight, that sets us up to fail.
         self.pose.orientation = ros_quat_from_euler(
-            np.array([0, 0, np.pi])
+            np.array([0, 0, 0]) # np.pi
         )
         # ------------------ DONE -----------------
         self.twist = Twist()

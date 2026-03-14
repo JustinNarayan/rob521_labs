@@ -31,6 +31,35 @@ Expected baseline: 287mm
 Observed baseline: 295mm
 '''
 
+'''
+In-lab
+
+rosrun rob521_lab3 l3_estimate_wheel_baseline.py
+
+<Manually test the trial on uneven surface to verify it works>
+
+Ready to start wheel radius calibration!
+Starting Calibration Procedure
+Calibrated Separation: 0.34509277343750006 m
+Resetted the robot to calibrate again!
+
+<Manually run the test on the main room tiles>
+
+Ready to start wheel radius calibration!
+Starting Calibration Procedure
+Calibrated Separation: 0.29577807617187507 m
+Resetted the robot to calibrate again!
+
+Ready to start wheel radius calibration!
+Starting Calibration Procedure
+Calibrated Separation: 0.301530517578125 m
+Resetted the robot to calibrate again!
+
+<This one seemed inconsistent>
+
+Final answer: 0.301530517578125 m
+'''
+
 
 class wheelBaselineEstimator():
     def __init__(self):

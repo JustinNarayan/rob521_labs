@@ -20,7 +20,7 @@ from utils import convert_pose_to_tf, convert_tf_to_pose, euler_from_ros_quat, \
 
 ALPHA = 2
 BETA = 1
-MAP_DIM = (4, 4)
+MAP_DIM = (8, 8)
 CELL_SIZE = .01
 NUM_PTS_OBSTACLE = 5
 SCAN_DOWNSAMPLE = 4
